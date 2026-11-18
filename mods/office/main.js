@@ -624,7 +624,17 @@ export default class Office extends View {
           .child(it.label))));
     return v_flex().size_full().p(12).gap(12).bg(t.popover)
       .child(row("風格", STYLES, styleOf().id, "office.style"))
-      .child(row("佈局", LAYOUTS, layoutOf().id, "office.layout"));
+      .child(row("佈局", LAYOUTS, layoutOf().id, "office.layout"))
+      .child(v_flex().gap(6)
+        .child(div().text_size(11).text_color(t.dim).child("視窗"))
+        .child(h_flex().id("office-popout").h(28).px(10).rounded(8).justify_center().items_center()
+          .bg(t.raised).border(1).border_color(t.border).text_size(12).text_color(t.foreground)
+          .hover((st) => st.bg(t.hover))
+          .on_click(() => {
+            run("mod.open", { name: "office" });
+            if (props()?.overlay) closeOverlay(props().overlay);
+          })
+          .child("以獨立視窗開啟")));
   }
 
   // Start a meeting; while one runs, its progress and a stop button; after, its minutes.
@@ -656,9 +666,9 @@ export default class Office extends View {
           .child(div().w(6).h(6).rounded(3).bg(t[s]))
           .child(`${STATUS[s].label} ${count(s)}`))))
       .child(this.meetingControl(t))
-      .child(div().id("office-settings").p(4).rounded(5).tooltip("風格與佈局")
+      .child(div().id("office-settings").p(4).rounded(5).tooltip("設定")
         .hover((st) => st.bg(t.hover))
-        .on_click(() => openOverlay({ mod: "office", kind: "popup", width: 248, height: 176, props: { settings: true } }))
+        .on_click(() => openOverlay({ mod: "office", kind: "popup", width: 248, height: 232, props: { settings: true } }))
         .child(svg("mods/workspace-chrome/settings.svg").size(14).text_color(t.muted)))
       .when(!!overlay, (el) => el.child(div().id("office-close").px(6).rounded(4).text_color(t.muted)
         .hover((st) => st.bg(t.hover).text_color(t.foreground))

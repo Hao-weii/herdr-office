@@ -1,7 +1,8 @@
-# Installs the office mod and links the team skill on Windows.
+﻿# Installs the office mod and links the team skill on Windows.
 # .\install.ps1 -StatusLine          also configure Claude Code's status line
+# .\install.ps1 -Sidebar             also add an "辦公室" toggle to the right sidebar (clones main layout and tabs mod)
 # .\install.ps1 -DryRun -StatusLine  preview only; no files are changed
-param([switch]$DryRun, [switch]$StatusLine, [switch]$Force)
+param([switch]$DryRun, [switch]$StatusLine, [switch]$Sidebar, [switch]$Force)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $nodeCommand = Get-Command node -CommandType Application -ErrorAction SilentlyContinue
@@ -45,4 +46,10 @@ foreach ($tool in $targets.Keys) {
     }
 }
 if ($StatusLine -and -not $DryRun) { Set-OfficeStatusLine -UserDirectory $HOME -Force:$Force }
+if ($Sidebar) {
+    $sidebarArgs = @((Join-Path $root 'scripts\sidebar.mjs'))
+    if ($DryRun) { $sidebarArgs += '--dry-run' }
+    & $nodeCommand.Source @sidebarArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Sidebar setup failed.' }
+}
 if ($DryRun) { Write-Host ''; Write-Host 'Dry run only, nothing changed.' }

@@ -29,7 +29,7 @@ git clone git@github.com:Hao-weii/herdr-office.git
 cd herdr-office
 npm test
 npm run check
-.\install.ps1 -StatusLine
+.\install.ps1 -StatusLine -Sidebar
 herdr-app do mod.open --name office
 ```
 
@@ -48,19 +48,21 @@ cd $HOME\Documents\GitHub\herdr-office
 1. 把 `mods/office` 複製到 `~/.config/herdr-app/mods/office`
 2. 用目錄連結把 `skills/herdr-team` 接到 Claude Code、Codex、agy 的 Skill 資料夾
 3. 有指定 `-StatusLine` 時，備份並設定 Claude Code 狀態列
+4. 有指定 `-Sidebar` 時，從 Herdr 原生的 `main` 版面與 `tabs` Mod 各自 clone 出 `office` 與 `tabs-office`，在右上角加入與 `Files`、`Changes` 並列的「辦公室」右側邊欄切換按鈕並切到該版面（因為 Herdr 原生版面與 Mod 在啟動／更新時會被覆蓋，必須使用 clone 才會保留）
 
 ### 打開辦公室
 
-最簡單的方式是在 Herdr 裡執行 `mod.open`，辦公室會以浮動視窗打開：
+- **右側邊欄（推薦單螢幕）**：安裝時加上 `.\install.ps1 -Sidebar`，右上角會多出「辦公室」按鈕，點一下即可像 `Changes` 一樣展開／收合；在面板右上角齒輪選單裡也可隨時點「以獨立視窗開啟」。
+- **獨立浮動視窗（適合雙螢幕）**：直接執行 `mod.open`：
 
 ```powershell
 herdr-app do mod.open --name office
 ```
 
-要放進側欄，在自己的版面檔（`~/.config/herdr-app/layouts/<名稱>.json`）加一個 block：
+如果要放進自己既有的客製版面（`~/.config/herdr-app/layouts/<名稱>.json`），可加一個 block：
 
 ```json
-{ "id": "office", "type": "block", "content": { "mod": "office", "props": { "dock": true } } }
+{ "id": "office", "type": "block", "content": { "mod": "office" } }
 ```
 
 ### Claude Code 的方案額度
