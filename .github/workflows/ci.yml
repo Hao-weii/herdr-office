@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check every script
+        run: npm run check
+      - name: Unit tests
+        run: npm test
+      # The pixel art is generated from code and committed (Herdr installs a mod by copying its
+      # folder, so the images must be in the repo). Regenerate and fail if they drift.
+      - name: Art matches its generator
+        run: |
+          npm run art
+          git add -A mods/office/img
+          git diff --cached --exit-code --stat -- mods/office/img
