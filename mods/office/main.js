@@ -342,7 +342,7 @@ export default class Office extends View {
   }
 
   provider(key, icon, tint, name, gauges, tip, t) {
-    return v_flex().id(`quota-${key}`).gap(6).min_w(0)
+    return v_flex().id(`quota-${key}`).gap(6).flex_none()
       .when(!!tip, (el) => el.tooltip(tip))
       .child(h_flex().gap(6).items_center()
         .child(tint ? svg(icon).size(13).flex_none().text_color(tint) : image(icon).w(13).h(13).flex_none())
@@ -377,7 +377,7 @@ export default class Office extends View {
       const tip = p.detail?.replace(/(\d{4,})/g, (n) => tokens(Number(n)));
       return this.provider(p.id, p.icon, p.tint, `${p.name}${plan}`, figures, p.windows?.length ? tip : null, t);
     });
-    const strip = h_flex().flex_none().mx(10).mt(8).px(12).py(8).gap(16).items_start().flex_wrap()
+    const strip = h_flex().id("office-usage").flex_none().h(100).mx(10).mt(8).px(12).py(8).gap(14).items_start().overflow_x_scrollbar()
       .rounded(8).bg(t.background).border(1).border_color(t.border);
     if (!u) return strip.child(div().h(56).flex().items_center().text_size(11).text_color(t.dim).child("讀取用量中…"));
     if (!groups.length) return strip.child(div().h(56).flex().items_center().text_size(11).text_color(t.dim).child("最近一週沒有偵測到 Claude Code、Codex 或 agy 的使用紀錄"));
@@ -683,7 +683,7 @@ export default class Office extends View {
     const t = theme();
     const list = agents();
     // The room takes whatever height is left and scales to fit it both ways.
-    return v_flex().size_full().bg(t.surface)
+    return v_flex().size_full().overflow_hidden().bg(t.surface)
       .child(this.header(list, t))
       .child(this.usageStrip(t))
       .child(h_flex().id("office-stage").flex_1().min_h(0).w_full().px(10).pt(8).justify_center().items_center().overflow_hidden()
