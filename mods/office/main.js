@@ -10,6 +10,8 @@
 // started with `hc run` (terminals with a parent).
 // Agents talking through the herdr-team skill (tell.mjs logs talk.jsonl) walk over to whoever
 // they talk to, with what they said in a bubble.
+// Each space (project) gets its own rug under its desks; idle agents run errands (water, the
+// window, the cat, a chat); the window and the lights follow the clock.
 // Status changes slide the character to its new zone. The rooms stack (narrow panel) or sit
 // side by side (wide panel), whichever lets them be bigger. Above the room: plan usage.
 // Art: art/generate.mjs. Usage: usage.mjs.
@@ -20,6 +22,7 @@ import { agents, terminals, theme, run, props, openOverlay, closeOverlay, exec, 
 import * as fs from "fs/promises";
 import {
   SCENE_W, WALL_H, ROW_H, LOUNGE_H, FILL_H, PER_ROW, DESK_X, LOUNGE_SPOTS, QUEUE_X, QUEUE_Y, MEET_H, MEET_SEATS, TALK_MS, TOOL_NAMES, toolOf, meetingOn, POSE_H, PALETTES, WALK, STATUS, ORDER, paletteOf, clean, task, spot, windowName, tokens, resetsIn, pickLayout,
+  seatBySpace, rugRects, ERRANDS, ERRAND_MS, errandSpot, phaseAt, clockText, DEMO,
 } from "./logic.js";
 
 // Looks the person can pick (art in img/<id>/), and how the room is laid out. Saved in shared state.
@@ -33,8 +36,21 @@ const LAYOUTS = [
   { id: "tall", label: "上下" },
   { id: "wide", label: "左右" },
 ];
+// Whether the window follows the clock (sunset, night) or stays at daytime.
+const DAYNIGHT = [
+  { id: "auto", label: "跟著時間" },
+  { id: "off", label: "固定白天" },
+];
 const styleOf = () => STYLES.find((x) => x.id === shared("office.style")) ?? STYLES[0];
 const layoutOf = () => LAYOUTS.find((x) => x.id === shared("office.layout")) ?? LAYOUTS[0];
+const daynightOf = () => DAYNIGHT.find((x) => x.id === shared("office.daynight")) ?? DAYNIGHT[0];
+// The night style is always night; the others follow the clock unless the person turned it off.
+// `hour` pins the clock for previews (data/office/demo with "hour=18").
+const phaseNow = (hour = null) => styleOf().id === "night" ? "night"
+  : daynightOf().id !== "auto" ? "day"
+  : phaseAt(hour === null ? new Date() : new Date(2000, 0, 1, hour));
+// Rug colors, one per space in turn, so neighbours never match: a see-through fill and a stronger edge.
+const RUGS = ["#6f9fd8", "#7fb07a", "#e9a24a", "#d9727a", "#a98bd6", "#5fb3b0"];
 
 export default class Office extends View {
   init(_props, cx) {
@@ -52,11 +68,20 @@ export default class Office extends View {
     this.meeting = null;
     this.subs = {};
     this.doneMeta = new Set();
+    // Idle agents' errands (address -> { kind, with, until }) and since when each has rested.
+    this.errands = {};
+    this.rested = {};
+    this.clock = clockText();
+    // A check draws a made-up office, so every part of the room gets drawn once.
+    this.demo = checking() ? DEMO : null;
     if (checking()) return;
     this.poll(cx);
     cx.timer.every(1500, (cx) => this.poll(cx));
     this.refresh(cx);
     cx.timer.every(60000, (cx) => this.refresh(cx));
+    cx.timer.every(2000, (cx) => this.errandTick(cx));
+    // The wall clock, and the sky when the hour turns.
+    cx.timer.every(10000, (cx) => { const c = clockText(); if (c !== this.clock) { this.clock = c; cx.notify(); } });
     // Sit them down once they arrive.
     cx.timer.every(300, (cx) => {
       const now = Date.now();
@@ -66,6 +91,56 @@ export default class Office extends View {
     });
   }
 
+  // The agents to draw: the real ones, or the made-up office while previewing.
+  people() {
+    return this.demo ?? agents();
+  }
+
+  // ---------- errands ----------
+
+  // Every couple of seconds: send errands home when they're over (or the agent got busy), and
+  // now and then send an idle agent that has rested a while on a new one. A few at a time.
+  errandTick(cx) {
+    const now = Date.now();
+    const list = this.people();
+    const byAddress = Object.fromEntries(list.map((a) => [a.address, a]));
+    let changed = false;
+    for (const [k, e] of Object.entries(this.errands)) {
+      if (e.until > now && byAddress[k]?.status === "idle") continue;
+      delete this.errands[k];
+      this.rested[k] = now;
+      changed = true;
+    }
+    for (const k of Object.keys(this.rested)) if (byAddress[k]?.status !== "idle") delete this.rested[k];
+    const idle = list.filter((a) => a.status === "idle");
+    for (const a of idle) this.rested[a.address] ??= now;
+    const out = Object.values(this.errands);
+    if (out.length < Math.max(1, Math.ceil(idle.length / 3)) && Math.random() < 0.3) {
+      const ready = idle.filter((a) => !this.errands[a.address] && now - this.rested[a.address] > ERRAND_MS.rest);
+      const working = list.filter((a) => a.status === "working");
+      // One at the cooler and one with the cat at a time; the window has room for a few.
+      const taken = new Set(out.map((e) => e.kind));
+      const kinds = ["water", "window", "cat", "chat", "chat"].filter((k) =>
+        k === "window" || (k === "chat" ? working.length > 0 : !taken.has(k)));
+      if (ready.length && kinds.length) {
+        const pick = (xs) => xs[Math.floor(Math.random() * xs.length)];
+        const kind = pick(kinds);
+        this.errands[pick(ready).address] = {
+          kind, with: kind === "chat" ? pick(working).address : null,
+          until: now + WALK.duration + ERRAND_MS.min + Math.random() * (ERRAND_MS.max - ERRAND_MS.min),
+        };
+        changed = true;
+      }
+    }
+    if (changed) cx.notify();
+  }
+
+  // What an agent on an errand is up to, over its head once it gets there.
+  doing(text) {
+    return div().h(16).px(5).rounded(8).bg(styleOf().ui.label).border(1).border_color(styleOf().ui.labelBorder)
+      .text_color(styleOf().ui.text).text_size(10).flex().items_center().child(text);
+  }
+
   // ---------- talk and meetings ----------
 
   // Recent messages between agents (tell.mjs) and the meeting in progress (meeting.mjs).
@@ -73,6 +148,17 @@ export default class Office extends View {
     cx.spawn(async (cx) => {
       const base = `${appHome()}/data/office`;
       let changed = false;
+      // A file named `demo` in the data folder swaps in the made-up office, for previews.
+      try {
+        const text = await readTextFile(`${base}/demo`);
+        const hour = text?.match(/hour=(\d+)/)?.[1];
+        const demoHour = hour === undefined ? null : Number(hour) % 24;
+        if ((text !== null) !== !!this.demo || demoHour !== this.demoHour) {
+          this.demo = text !== null ? DEMO : null;
+          this.demoHour = this.demo ? demoHour : null;
+          changed = true;
+        }
+      } catch { /* no data folder yet */ }
       try {
         const now = Date.now();
         const talks = ((await readTextFile(`${base}/talk.jsonl`)) ?? "").trim().split("\n")
@@ -496,20 +582,78 @@ export default class Office extends View {
     return pickLayout({ stageW: this.stageW, stageH: this.stageH, rows, meet, pref: layoutOf().id });
   }
 
-  room(L, rows, s) {
+  // The room's floor plan: walls (with the sky of the hour), the floor under the desks, the
+  // meeting room and the lounge. The desks themselves go on top, after the rugs (deskLayer).
+  room(L, rows, s, phase) {
     const px = (n) => Math.round(n * s);
     const img = (name, h) => image(`mods/office/img/${styleOf().id}/${name}.svg`).w(px(SCENE_W)).h(px(h)).flex_none();
+    const sky = phase === "day" || styleOf().id === "night" ? "" : `-${phase}`;
     const desks = v_flex().w(px(SCENE_W)).flex_none()
-      .child(img("wall", WALL_H))
-      .children(Array.from({ length: rows }, () => img("deskrow", ROW_H)))
+      .child(img(`wall${sky}`, WALL_H))
+      .children(Array.from({ length: rows }, () => img("floor", ROW_H)))
       .when(!!L.meet, (el) => el.child(img("meeting", MEET_H)));
     if (!L.wide) return desks.child(img("lounge", LOUNGE_H));
     const fills = Math.max(0, Math.ceil((L.h - WALL_H - LOUNGE_H) / FILL_H));
     const lounge = v_flex().w(px(SCENE_W)).h(px(L.h)).flex_none().overflow_hidden()
-      .child(img("wall-lounge", WALL_H))
+      .child(img(`wall-lounge${sky}`, WALL_H))
       .child(img("lounge-open", LOUNGE_H))
       .children(Array.from({ length: fills }, () => img("lounge-fill", FILL_H)));
     return h_flex().child(desks).child(lounge);
+  }
+
+  // Each space's rug under its desks (drawn before the desks).
+  rugs(groups, s) {
+    const px = (n) => Math.round(n * s);
+    return groups.flatMap((g, i) => rugRects(g.desks).map((r, j) => div().id(`rug-${g.space}-${j}`).absolute()
+      .left(px(r.x)).top(px(r.y)).w(px(r.w)).h(px(r.h)).rounded(px(4))
+      .bg(`${RUGS[i % RUGS.length]}40`).border(Math.max(1, Math.round(s))).border_color(`${RUGS[i % RUGS.length]}aa`)));
+  }
+
+  // Which rug is which space: a tag per space, in its rug's color, on the wall above the desks
+  // (the desks leave no free corner on a rug). Wraps to a second line, the clock keeps its spot.
+  spaceLegend(groups, s) {
+    return h_flex().absolute().left(Math.round(4 * s)).top(Math.round(6 * s)).max_w(Math.round(150 * s)).flex_wrap().gap(4)
+      .children(groups.map((g, i) => div().id(`rug-tag-${g.space}`).h(16).px(6).rounded(5).max_w(Math.round(100 * s))
+        .bg(RUGS[i % RUGS.length]).border(1).border_color("#00000026").text_color("#ffffff").text_size(10).font_semibold()
+        .truncate().flex().items_center().tooltip(`${g.name} · ${g.agents.length} 位`).child(g.name)));
+  }
+
+  // The desks, one see-through row each, over the floor and the rugs.
+  deskLayer(rows, s) {
+    const px = (n) => Math.round(n * s);
+    return Array.from({ length: rows }, (_, r) => div().absolute().left(0).top(px(WALL_H + r * ROW_H))
+      .child(image(`mods/office/img/${styleOf().id}/deskrow.svg`).w(px(SCENE_W)).h(px(ROW_H))));
+  }
+
+  // Evening light: a warm tint at sunset; at night (day styles only, the night style is drawn
+  // dark already) the room dims. In the dark the floor lamp and working monitors glow.
+  light(L, phase, s, placed) {
+    const px = (n) => Math.round(n * s);
+    const out = [];
+    const dim = styleOf().id !== "night";
+    if (phase === "dusk") out.push(div().absolute().left(0).top(0).w(px(L.w)).h(px(L.h)).bg("#ff8a3d14"));
+    if (phase === "night" && dim) out.push(div().absolute().left(0).top(0).w(px(L.w)).h(px(L.h)).bg("#0a123048"));
+    if (phase !== "night") return out;
+    if (dim) for (const [r, a] of [[26, "14"], [16, "1c"]]) {
+      out.push(div().absolute().left(px(L.lo.x + 123 - r)).top(px(L.lo.y + 30 - r)).w(px(r * 2)).h(px(r * 2)).rounded(px(r)).bg(`#ffe39a${a}`));
+    }
+    for (const p of placed) {
+      if (p.a.status !== "working" || p.meeting || p.talk) continue;
+      const row = Math.floor(p.desk / PER_ROW), cx = DESK_X[p.desk % PER_ROW];
+      out.push(div().absolute().left(px(cx - 17)).top(px(WALL_H + row * ROW_H - 4))
+        .w(px(34)).h(px(24)).rounded(px(10)).bg("#79c0ff1f"));
+    }
+    return out;
+  }
+
+  // A clock on the wall: the real time, a sun or a moon by it.
+  wallClock(phase, s) {
+    const mark = phase === "night" ? "☾" : "☀";
+    return div().absolute().left(Math.round(158 * s)).top(Math.round(6 * s)).px(6).h(17).gap(3).rounded(9)
+      .bg(styleOf().ui.label).border(1).border_color(styleOf().ui.labelBorder).text_color(styleOf().ui.text)
+      .text_size(10).font_semibold().flex().items_center()
+      .child(div().text_color(phase === "night" ? "#8aa0d6" : phase === "dusk" ? "#e07a3a" : "#e0a020").child(mark))
+      .child(this.demoHour != null ? `${String(this.demoHour).padStart(2, "0")}:00` : this.clock ?? clockText());
   }
 
   // The wall between the two rooms when they sit side by side, with a door.
@@ -521,12 +665,14 @@ export default class Office extends View {
   }
 
   scene(list, t) {
-    const rows = Math.max(2, Math.ceil(list.length / PER_ROW));
+    const seating = seatBySpace(list), rows = seating.rows;
     const m = meetingOn(this.meeting) ? this.meeting : null;
     const seats = m ? m.participants.filter((x) => list.some((a) => a.address === x)) : [];
     const L = this.layoutFor(rows, seats.length > 0), s = L.s, lo = L.lo, mo = L.mo;
+    const phase = phaseNow(this.demoHour ?? null);
     const count = { working: 0, blocked: 0, done: 0, idle: 0 };
-    const placed = list.map((a, desk) => {
+    const placed = list.map((a) => {
+      const desk = seating.desk[a.address];
       const seat = seats.indexOf(a.address);
       if (seat >= 0) {
         const [x, y, pose] = MEET_SEATS[seat];
@@ -545,6 +691,16 @@ export default class Office extends View {
       p.talk = x;
       p.place = [Math.min(to.place[0] + 17, L.w - 9), to.place[1] - (to.place[2] === "type" ? 2 : 3), "stand"];
     }
+    // Idle agents out on an errand. Their sofa stays theirs, so nobody else shuffles over.
+    let atWindow = 0;
+    for (const p of placed) {
+      const e = this.errands?.[p.a.address];
+      if (!e || p.meeting || p.talk || p.a.status !== "idle") continue;
+      const place = errandSpot(e.kind, lo, e.kind === "window" ? atWindow++ : 0, e.with ? at[e.with]?.place : null);
+      if (!place) continue;
+      p.place = [Math.min(place[0], L.w - 9), place[1], place[2]];
+      p.errand = e;
+    }
     // Same layout and scale as last time and a new spot: the agent walks there.
     const key = `${L.wide ? "w" : "t"}${Math.round(s * 100)}`;
     const now = Date.now();
@@ -559,14 +715,20 @@ export default class Office extends View {
       if (p.meeting && m.speaker === p.a.address) return this.speaking(m.status === "summarizing" ? "整理結論中" : "發言中", t);
       if (p.meeting) return false; // in the meeting only the speaker gets a sign
       if (p.talk) return this.bubble(`→ ${names[p.talk.to] ?? toolOf(at[p.talk.to].a)}：${p.talk.text}`, t);
+      if (p.errand) { const label = ERRANDS[p.errand.kind].label; return label && !this.walking[p.a.address] ? this.doing(label) : false; }
       return null;
     };
     // Farther back draws first, so nearer characters overlap them.
     const byDepth = [...placed].sort((p, q) => p.place[1] - q.place[1]);
     return div().relative().w(Math.round(L.w * s)).h(Math.round(L.h * s)).overflow_hidden()
-      .child(this.room(L, rows, s))
+      .child(this.room(L, rows, s, phase))
+      .children(this.rugs(seating.groups, s))
+      .children(this.deskLayer(rows, s))
       .when(L.wide, (el) => el.children(this.divider(L, s)))
-      .child(this.zone("工作區", 4, 30, s))
+      .children(this.light(L, phase, s, placed))
+      .child(this.wallClock(phase, s))
+      // The spaces' tags name the work area; with nobody in, the plain label does.
+      .child(seating.groups.length ? this.spaceLegend(seating.groups, s) : this.zone("工作區", 4, 6, s))
       .child(this.zone("休息區", lo.x + 8, lo.y + 112, s))
       .child(this.zone("你的桌子", lo.x + 144, lo.y + 114, s))
       .when(!!L.meet, (el) => el.child(this.zone("會議室", mo.x + 150, mo.y + 47, s)))
@@ -625,6 +787,7 @@ export default class Office extends View {
     return v_flex().size_full().p(12).gap(12).bg(t.popover)
       .child(row("風格", STYLES, styleOf().id, "office.style"))
       .child(row("佈局", LAYOUTS, layoutOf().id, "office.layout"))
+      .child(row("日夜", DAYNIGHT, daynightOf().id, "office.daynight"))
       .child(v_flex().gap(6)
         .child(div().text_size(11).text_color(t.dim).child("視窗"))
         .child(h_flex().id("office-popout").h(28).px(10).rounded(8).justify_center().items_center()
@@ -668,7 +831,7 @@ export default class Office extends View {
       .child(this.meetingControl(t))
       .child(div().id("office-settings").p(4).rounded(5).tooltip("設定")
         .hover((st) => st.bg(t.hover))
-        .on_click(() => openOverlay({ mod: "office", kind: "popup", width: 248, height: 232, props: { settings: true } }))
+        .on_click(() => openOverlay({ mod: "office", kind: "popup", width: 248, height: 290, props: { settings: true } }))
         .child(svg("mods/workspace-chrome/settings.svg").size(14).text_color(t.muted)))
       .when(!!overlay, (el) => el.child(div().id("office-close").px(6).rounded(4).text_color(t.muted)
         .hover((st) => st.bg(t.hover).text_color(t.foreground))
@@ -681,7 +844,7 @@ export default class Office extends View {
     if (props()?.settings) return this.renderSettings();
     if (props()?.meetingSetup) return this.renderMeetingSetup();
     const t = theme();
-    const list = agents();
+    const list = this.people();
     // The room takes whatever height is left and scales to fit it both ways.
     return v_flex().size_full().overflow_hidden().bg(t.surface)
       .child(this.header(list, t))

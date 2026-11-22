@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   WALL_H, ROW_H, LOUNGE_H, MEET_H, SCENE_W, DESK_X, QUEUE_X, QUEUE_Y, LOUNGE_SPOTS, PALETTES,
   paletteOf, task, spot, windowName, tokens, resetsIn, pickLayout, meetingOn, toolOf,
+  PER_ROW, seatBySpace, rugRects, errandSpot, WINDOW_X, phaseAt, clockText, DEMO,
 } from "../mods/office/logic.js";
 
 const lo = { x: 0, y: 200 };
@@ -96,4 +97,56 @@ test("tools get their usual names", () => {
   assert.equal(toolOf({ app: "claude-code" }), "Claude Code");
   assert.equal(toolOf({ app: "antigravity" }), "agy");
   assert.equal(toolOf({ program: { name: "Pi" } }), "Pi");
+});
+
+const ag = (address, space) => ({ address, space, space_name: space });
+
+test("each space's agents sit together; a space that won't fit the rest of a row starts a new one", () => {
+  const { desk, groups, rows } = seatBySpace([ag("a1", "web"), ag("a2", "web"), ag("b1", "api"), ag("b2", "api"), ag("c1", "ops")]);
+  assert.deepEqual(groups.map((g) => g.name), ["web", "api", "ops"]);
+  assert.deepEqual([desk.a1, desk.a2], [0, 1]);
+  // Two api agents don't fit the one desk left on row 0, so they take row 1.
+  assert.deepEqual([desk.b1, desk.b2], [PER_ROW, PER_ROW + 1]);
+  // One ops agent fits the desk left on row 1.
+  assert.equal(desk.c1, PER_ROW + 2);
+  assert.equal(rows, 2);
+});
+
+test("the room keeps at least two rows, and grows with the agents", () => {
+  assert.equal(seatBySpace([]).rows, 2);
+  assert.equal(seatBySpace([ag("a", "x")]).rows, 2);
+  assert.equal(seatBySpace(DEMO).rows, 4);
+  assert.equal(new Set(Object.values(seatBySpace(DEMO).desk)).size, DEMO.length);
+});
+
+test("a rug covers a group's desks, one rectangle per row", () => {
+  const one = rugRects([0, 1]);
+  assert.equal(one.length, 1);
+  assert.equal(one[0].y, WALL_H + 1);
+  assert.ok(one[0].x < DESK_X[0] && one[0].x + one[0].w > DESK_X[1]);
+  const two = rugRects([2, 3, 4]);
+  assert.equal(two.length, 2);
+  assert.equal(two[1].y, WALL_H + ROW_H + 1);
+  // Neighbouring groups' rugs on one row don't overlap.
+  const [a] = rugRects([0]), [b] = rugRects([1]);
+  assert.ok(a.x + a.w <= b.x);
+});
+
+test("errands take an idle agent to the cooler, the window, the cat, or beside a coworker", () => {
+  assert.deepEqual(errandSpot("water", lo), [lo.x + 9, lo.y + 22, "standBack"]);
+  assert.equal(errandSpot("window", lo, 0)[0], WINDOW_X[0]);
+  assert.notDeepEqual(errandSpot("window", lo, 0), errandSpot("window", lo, 1));
+  assert.notDeepEqual(errandSpot("window", lo, 0), errandSpot("window", lo, WINDOW_X.length));
+  assert.equal(errandSpot("chat", lo, 0, [34, 81, "type"])[0], 34 + 15);
+  assert.equal(errandSpot("chat", lo), null);
+});
+
+test("the window follows the clock: day, sunset, night", () => {
+  const at = (h) => new Date(2026, 0, 1, h, 30);
+  assert.equal(phaseAt(at(6)), "day");
+  assert.equal(phaseAt(at(16)), "day");
+  assert.equal(phaseAt(at(17)), "dusk");
+  assert.equal(phaseAt(at(19)), "night");
+  assert.equal(phaseAt(at(2)), "night");
+  assert.equal(clockText(new Date(2026, 0, 1, 9, 5)), "09:05");
 });

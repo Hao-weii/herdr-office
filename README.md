@@ -7,6 +7,9 @@ Herdr 桌面 App 的像素辦公室面板。每個在 Herdr 裡跑的 coding age
 | 功能 | 說明 |
 |---|---|
 | 辦公室場景 | 工作區、你的桌子、休息區，開會時多一間會議室。狀態一變，人會走到對應的區域 |
+| 專案分組 | 同一個 Space（專案）的 Agent 坐在一起，底下鋪同色地毯；牆上的色牌標出每塊地毯是哪個專案 |
+| 閒置走動 | 閒置一陣子的 Agent 會起身去倒水、看窗外、摸貓，或走到工作中的同事旁邊聊天，過一會兒再回沙發 |
+| 日夜 | 牆上掛著現在的時間；窗外白天是藍天，17 點起是黃昏，19 點起入夜，燈和螢幕會亮。設定裡可改成固定白天 |
 | 實習生 | Agent 開的子代理畫成小一號的人，跟在它旁邊。支援 Claude Code 內建的子代理和 `hc run` 開的子 Agent |
 | 用量 | 自動偵測最近一週用過的工具。Claude Code、Codex 顯示剩餘額度圓環，agy 顯示今天的提問次數 |
 | 傳話 | 裝了 `herdr-team` Skill 的 Agent 可以互相派工、回報，辦公室畫出誰在跟誰說話 |
@@ -86,6 +89,8 @@ herdr-app check $HOME\.config\herdr-app\mods\office   # 在 Herdr 裡實際載�
 ```
 
 改了 `mods/office/art/generate.mjs` 之後要跑 `npm run art`，並把產生的圖一起提交。Herdr 安裝 Mod 是直接複製資料夾，不會幫你產圖。
+
+預覽模式：在 `~/.config/herdr-app/data/office/` 建一個名為 `demo` 的檔案，面板會改畫一間有三個專案、九位 Agent 的假辦公室，方便檢查分組、走動和日夜。檔案內容寫 `hour=18` 可以固定時間（例如看黃昏）。刪掉檔案就回到真實狀態。`herdr-app check` 也是用這間假辦公室畫一次。
 
 ## 檔案
 

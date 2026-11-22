@@ -21,7 +21,7 @@ export const TALK_MS = 10000;
 export const TOOL_NAMES = { "claude-code": "Claude Code", claude: "Claude Code", codex: "Codex", antigravity: "agy", agy: "agy" };
 export const toolOf = (a) => TOOL_NAMES[a.app] ?? TOOL_NAMES[a.program?.key] ?? a.program?.name ?? a.app ?? "Agent";
 export const meetingOn = (m) => !!m && (m.status === "running" || m.status === "summarizing") && Date.now() - (m.updated_at ?? 0) < 40 * 60000;
-export const POSE_H = { walkA: 21, walkB: 21, walk: 21, stand: 21, waveA: 21, waveB: 21, cheer: 21, sofa: 19, back: 16, typeA: 16, typeB: 16 };
+export const POSE_H = { walkA: 21, walkB: 21, walk: 21, stand: 21, standBack: 21, waveA: 21, waveB: 21, cheer: 21, sofa: 19, back: 16, typeA: 16, typeB: 16 };
 export const PALETTES = 6;
 export const WALK = { duration: 1400, easing: "ease-in-out" };
 
@@ -64,6 +64,80 @@ export function spot(a, desk, n, lo) {
   const lap = Math.floor(n / LOUNGE_SPOTS.length);
   return [lo.x + x + lap * 6, lo.y + y + lap * 4, pose];
 }
+
+// ---------- spaces ----------
+// Each space's agents sit together, on a rug of their own with the space's name. A space starts
+// a new row unless it fits in what is left of the current one. Returns each agent's desk, the
+// groups (in order; `desks` ascending) and how many rows of desks the room needs (at least two).
+export function seatBySpace(list) {
+  const groups = [], byId = new Map();
+  for (const a of list) {
+    const id = a.space ?? a.space_name ?? "";
+    let g = byId.get(id);
+    if (!g) { g = { space: id, name: a.space_name ?? "", agents: [], desks: [] }; byId.set(id, g); groups.push(g); }
+    g.agents.push(a.address);
+  }
+  const desk = {};
+  let next = 0;
+  for (const g of groups) {
+    const used = next % PER_ROW;
+    if (used && g.agents.length > PER_ROW - used) next += PER_ROW - used;
+    for (const address of g.agents) { desk[address] = next; g.desks.push(next++); }
+  }
+  return { desk, groups, rows: Math.max(2, Math.ceil(next / PER_ROW)) };
+}
+
+// The rug under a group's desks: one rectangle per row it covers, in scene units.
+export function rugRects(desks) {
+  const rows = new Map();
+  for (const d of desks) {
+    const r = Math.floor(d / PER_ROW), c = d % PER_ROW, e = rows.get(r);
+    rows.set(r, e ? [Math.min(e[0], c), Math.max(e[1], c)] : [c, c]);
+  }
+  return [...rows].map(([r, [c0, c1]]) => ({ x: DESK_X[c0] - 32, y: WALL_H + r * ROW_H + 1, w: DESK_X[c1] - DESK_X[c0] + 64, h: ROW_H - 2 }));
+}
+
+// ---------- errands ----------
+// Now and then an idle agent gets up: a glass of water at the cooler, a look out of the window,
+// the cat, or a chat at a working coworker's desk. Then it walks back to its sofa.
+export const ERRANDS = {
+  water: { label: "倒水" },
+  window: { label: null }, // seen from behind at the glass; a label would cover the space tags
+  cat: { label: "摸貓" },
+  chat: { label: "聊天" },
+};
+export const WINDOW_X = [67, 133];
+export const ERRAND_MS = { rest: 15000, min: 6000, max: 14000 };
+
+// Where an errand takes the agent: [x of its middle, y of the sprite's top, pose]. `n` spreads
+// several agents at the window; `target` is the coworker's place for a chat (null: no errand).
+export function errandSpot(kind, lo, n = 0, target = null) {
+  if (kind === "water") return [lo.x + 9, lo.y + 22, "standBack"];
+  if (kind === "window") return [WINDOW_X[n % WINDOW_X.length] + Math.floor(n / WINDOW_X.length) * 8, WALL_H - 24, "standBack"];
+  if (kind === "cat") return [lo.x + 92, lo.y + 52, "stand"];
+  if (kind === "chat" && target) return [target[0] + 15, target[1] - (target[2] === "type" ? 2 : 3), "stand"];
+  return null;
+}
+
+// ---------- time of day ----------
+// The window follows the clock: day from 6, sunset from 17, night from 19.
+export function phaseAt(date = new Date()) {
+  const h = date.getHours();
+  if (h >= 6 && h < 17) return "day";
+  if (h >= 17 && h < 19) return "dusk";
+  return "night";
+}
+export const clockText = (date = new Date()) => `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+
+// A made-up office for `herdr-app check` and for previews (data/office/demo): three spaces.
+export const DEMO = [
+  ["web", "working", "fix login"], ["web", "blocked", "migrate db"], ["web", "idle", "docs"], ["web", "working", "refactor api"],
+  ["api", "done", "write tests"], ["api", "idle", "triage"], ["api", "working", "perf pass"],
+  ["infra", "idle", "standup"], ["infra", "idle", "coffee"],
+].map(([space, status, tab_name], i) => ({
+  address: `demo${i}`, pane: `demo${i}`, space, space_name: space, tab: `${space}-${i}`, tab_index: i, tab_name, status,
+  app: i % 3 ? "claude-code" : "codex", program: { key: "agent", name: "Agent" }, title: "", seq: i, pinned: false, focused: i === 0,
+}));
 
 // "每週" for a week-long window, "5 小時" for five hours.
 export function windowName(minutes) {

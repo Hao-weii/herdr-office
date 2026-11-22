@@ -187,11 +187,30 @@ function tree(cv, x, y, s) {
 
 const DESK_X = [34, 100, 166];
 
+// The sky through the glass at sunset and at night, for the day styles: the mod picks the wall
+// that matches the clock. The glass gets thinner so the colors come through.
+const PHASES = {
+  dusk: {
+    skyBands: ["#e9806a", "#f19a6a", "#f6b673", "#fbd08c"], sun: true,
+    far: "#9a8470", treeA: "#6f6a4a", treeB: "#5a5840", treeC: "#86805a", trunk: "#5a4232",
+  },
+  night: {
+    sky: "#1d2547", stars: true, moon: true,
+    far: "#1a2638", treeA: "#1e3a2c", treeB: "#18302a", treeC: "#26493a", trunk: "#2a2320",
+  },
+};
+
 // The top: a glass curtain wall with trees outside. "lounge" plants different trees.
-function wall(variant = "office") {
+// `phase`: "dusk" or "night" for the evening walls (wall-dusk.svg, wall-lounge-night.svg, …).
+function wall(variant = "office", phase = null) {
+  const saved = C;
+  if (phase) C = { ...C, ...PHASES[phase], glass: `${C.glassSolid}40` };
   const cv = new Canvas(200, 48);
   cv.rect(0, 0, 200, 44, C.sky);
+  if (C.skyBands) C.skyBands.forEach((c, i) => cv.rect(0, i * 7, 200, i === C.skyBands.length - 1 ? 44 - i * 7 : 7, c));
+  if (C.sun) cv.circle(variant === "office" ? 150 : 60, 25, 7, "#ffe08a");
   if (C.stars) for (let i = 0; i < 40; i++) cv.rect((i * 47 + 13) % 200, (i * 29 + 5) % 24, 1, 1, i % 5 ? "#c9d3ff" : "#fff6c2");
+  if (C.moon) cv.circle(variant === "office" ? 164 : 52, 11, 4, "#f5f0d0").circle(variant === "office" ? 166 : 54, 10, 3, C.sky);
   cv.rect(0, 26, 200, 18, C.far);
   const trees = variant === "office"
     ? [[6, 10, 1], [40, 14, 0], [70, 8, 1], [112, 13, 0], [142, 9, 1], [178, 12, 0]]
@@ -203,13 +222,21 @@ function wall(variant = "office") {
   cv.rect(0, 0, 200, 3, C.alu).rect(0, 3, 200, 1, C.aluLo);
   cv.rect(0, 42, 200, 2, C.alu).rect(0, 44, 200, 4, C.sill).rect(0, 47, 200, 1, C.sillLo);
   if (variant === "office") { plant(cv, 76, 30); plant(cv, 156, 30); } else plant(cv, 96, 30);
-  cv.save(variant === "office" ? "wall.svg" : "wall-lounge.svg");
+  cv.save(`${variant === "office" ? "wall" : "wall-lounge"}${phase ? `-${phase}` : ""}.svg`);
+  C = saved;
 }
 
-// One long oak table with three stations, white task chairs in front.
-function deskRow() {
+// The floor under a row of desks. The desks come as their own see-through layer (deskrow.svg),
+// so each space's rug can lie between the two.
+function floorRow() {
   const cv = new Canvas(200, 76);
   floor(cv, 0, 0, 200, 76);
+  cv.save("floor.svg");
+}
+
+// One long oak table with three stations, white task chairs in front. No floor: see floorRow.
+function deskRow() {
+  const cv = new Canvas(200, 76);
   cv.rect(8, 30, 186, 3, C.shadow);
   cv.box(6, 8, 188, 20, C.oak, C.oakHi, null);
   cv.box(6, 26, 188, 4, C.oakEdge);
@@ -270,6 +297,14 @@ function cat(cv, x, y) {
   ]), { "#": C.line, o: C.cat, O: C.catLo, e: C.line, w: C.catHi });
 }
 
+// A water cooler: a blue bottle on a white stand with two taps. 10 wide, 22 tall.
+function waterCooler(cv, x, y) {
+  cv.box(x + 2, y, 6, 8, "#a9d4f2", "#d6ecfa", "#86bde6");
+  cv.box(x, y + 7, 10, 15, C.snow, C.white, C.gray1);
+  cv.rect(x + 2, y + 10, 2, 2, "#d0605e").rect(x + 6, y + 10, 2, 2, "#5b8fc7");
+  cv.rect(x + 2, y + 14, 6, 1, C.gray2);
+}
+
 // A glass panel in an aluminium frame.
 function glassPanel(cv, x, y, w, h) {
   cv.rect(x, y, w, h, C.glassSolid).rect(x, y, w, h, C.glass);
@@ -312,6 +347,7 @@ function lounge(open = false) {
   cv.box(98, 62, 20, 9, C.accent, C.accentHi, C.accentLo);
   cat(cv, 101, 57);
   plant(cv, 1, 94, true);
+  waterCooler(cv, 4, 12);
   // ----- your desk -----
   glassPanel(cv, 134, 14, 5, 116);
   cv.box(141, 14, 57, 116, C.zoneBorder);
@@ -435,6 +471,8 @@ function poses() {
   out.walkB = over(FRONT, { 17: ".....PPPPPP.....", 18: ".....PPPPPP.....", 19: ".....BBBBBB....." });
   out.sofa = [...over(FRONT, SLEEPY).slice(0, 11), ...SOFA_BODY];
   out.back = [...BACK];
+  // standing, back to us (at the window, at the cooler): the back of the torso over the legs
+  out.standBack = [...BACK.slice(0, 15), ...FRONT.slice(15)];
   out.typeA = [...BACK]; set(out.typeA, 9, 2, "S"); set(out.typeA, 10, 2, "T");
   out.typeB = [...BACK]; set(out.typeB, 9, 13, "S"); set(out.typeB, 10, 13, "T");
   const wave = (col, top) => {
@@ -511,6 +549,9 @@ for (const [name, over] of Object.entries(STYLES)) {
   mkdirSync(DIR, { recursive: true });
   wall();
   wall("lounge");
+  // The night style is always night; the day styles get a sunset and a night wall.
+  if (name !== "night") for (const phase of Object.keys(PHASES)) { wall("office", phase); wall("lounge", phase); }
+  floorRow();
   deskRow();
   lounge();
   lounge(true);
