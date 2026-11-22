@@ -185,7 +185,6 @@ function tree(cv, x, y, s) {
 
 // ---------- room pieces ----------
 
-const DESK_X = [34, 100, 166];
 
 // The sky through the glass at sunset and at night, for the day styles: the mod picks the wall
 // that matches the clock. The glass gets thinner so the colors come through.
@@ -221,41 +220,63 @@ function wall(variant = "office", phase = null) {
   for (let x = 0; x < 200; x += 40) cv.rect(x, 0, 2, 44, C.alu).rect(x + 2, 0, 1, 44, C.aluLo);
   cv.rect(0, 0, 200, 3, C.alu).rect(0, 3, 200, 1, C.aluLo);
   cv.rect(0, 42, 200, 2, C.alu).rect(0, 44, 200, 4, C.sill).rect(0, 47, 200, 1, C.sillLo);
-  if (variant === "office") { plant(cv, 76, 30); plant(cv, 156, 30); } else plant(cv, 96, 30);
+  if (variant === "office") {
+    plant(cv, 70, 30); plant(cv, 156, 30);
+    // the way in: a glass door in an aluminium frame, a bar handle
+    cv.box(89, 4, 22, 40, C.alu, null, C.aluLo).rect(91, 6, 18, 37, C.glassSolid).rect(91, 6, 18, 37, C.glass);
+    for (let i = 0; i < 8; i++) cv.rect(93 + i, 9 + i * 3, 1, 3, C.glassHi);
+    cv.box(105, 20, 2, 10, C.aluLo);
+  } else plant(cv, 96, 30);
   cv.save(`${variant === "office" ? "wall" : "wall-lounge"}${phase ? `-${phase}` : ""}.svg`);
   C = saved;
 }
 
-// The floor under a row of desks. The desks come as their own see-through layer (deskrow.svg),
-// so each space's rug can lie between the two.
+// The floor under a row of pods. The pods come as their own see-through layer, so each space's
+// rug can lie between the two.
 function floorRow() {
-  const cv = new Canvas(200, 76);
-  floor(cv, 0, 0, 200, 76);
+  const cv = new Canvas(200, POD_H);
+  floor(cv, 0, 0, 200, POD_H);
   cv.save("floor.svg");
 }
 
-// One long oak table with three stations, white task chairs in front. No floor: see floorRow.
-function deskRow() {
-  const cv = new Canvas(200, 76);
-  cv.rect(8, 30, 186, 3, C.shadow);
-  cv.box(6, 8, 188, 20, C.oak, C.oakHi, null);
-  cv.box(6, 26, 188, 4, C.oakEdge);
-  cv.box(10, 29, 3, 6, C.white).box(187, 29, 3, 6, C.white);
-  DESK_X.forEach((cx, i) => {
-    // display on an aluminium stand
-    cv.box(cx - 11, 0, 22, 14, C.alu, null, C.aluLo);
-    cv.rect(cx - 9, 2, 18, 10, C.screen).rect(cx - 9, 2, 18, 1, C.screenHi);
-    cv.box(cx - 2, 13, 4, 5, C.aluLo).box(cx - 6, 17, 12, 2, C.alu);
-    // keyboard and mouse
-    cv.box(cx - 9, 20, 18, 4, C.white, null, C.gray1);
-    cv.box(cx + 11, 20, 3, 4, C.white);
-    if (i === 0) { cv.box(cx - 22, 12, 9, 11, C.snow, null, C.gray1).rect(cx - 20, 15, 5, 1, C.gray2).rect(cx - 20, 17, 5, 1, C.gray2); mug(cv, cx + 15, 12); }
-    if (i === 1) { plant(cv, cx - 23, 7); cv.box(cx + 15, 13, 6, 4, C.white).rect(cx + 16, 14, 4, 1, C.gray1); }
-    if (i === 2) { cv.box(cx - 22, 14, 8, 3, C.book[0]).box(cx - 22, 16, 8, 3, C.book[1]).box(cx - 21, 18, 7, 3, C.book[2]); mug(cv, cx + 15, 12); }
-    cv.rect(cx - 8, 52, 16, 3, C.shadow);
-    chair(cv, cx - 9, 41);
-  });
-  cv.save("deskrow.svg");
+// An island of four desks (pod.svg): a long oak table, two chairs on the far side turned toward
+// us, two on the near side with their backs to us. The near pair's screens face us; the far
+// pair's monitors show us their backs, and those go in podfront.svg, drawn over the people sitting
+// behind them. Seats' middles at SEAT_X. No floor.
+const POD_H = 84, SEAT_X = [26, 70];
+function pod() {
+  const cv = new Canvas(96, POD_H);
+  for (const x of SEAT_X) chair(cv, x - 9, 4, true);
+  cv.rect(6, 47, 86, 3, C.shadow);
+  cv.box(4, 16, 88, 30, C.oak, C.oakHi, null);
+  cv.box(4, 44, 88, 4, C.oakEdge);
+  cv.box(8, 47, 3, 6, C.white).box(85, 47, 3, 6, C.white);
+  for (const [i, x] of SEAT_X.entries()) {
+    // near monitor, screen toward us, on a stand
+    cv.box(x - 11, 26, 22, 13, C.alu, null, C.aluLo);
+    cv.rect(x - 9, 28, 18, 9, C.screen).rect(x - 9, 28, 18, 1, C.screenHi);
+    cv.box(x - 2, 38, 4, 3, C.aluLo).box(x - 6, 40, 12, 2, C.alu);
+    cv.box(x - 9, 42, 18, 3, C.white, null, C.gray1);
+    cv.box(x + 11, 42, 3, 3, C.white);
+    if (i === 0) { cv.box(x - 20, 27, 8, 10, C.snow, null, C.gray1).rect(x - 18, 30, 4, 1, C.gray2).rect(x - 18, 32, 4, 1, C.gray2); }
+    else { cv.box(x + 13, 29, 7, 3, C.book[0]).box(x + 13, 31, 7, 3, C.book[1]).box(x + 14, 33, 6, 3, C.book[2]); }
+    cv.rect(x - 8, 70, 16, 3, C.shadow);
+    chair(cv, x - 9, 59);
+  }
+  plant(cv, 43, 28);
+  mug(cv, 40, 39); mug(cv, 52, 39);
+  cv.save("pod.svg");
+}
+
+// The backs of the far pair's monitors, drawn in front of the people facing us.
+function podFront() {
+  const cv = new Canvas(96, POD_H);
+  for (const x of SEAT_X) {
+    cv.box(x - 11, 13, 22, 13, C.alu, C.white, C.aluLo);
+    cv.rect(x - 1, 18, 2, 2, C.gray3);
+    cv.box(x - 3, 25, 6, 2, C.aluLo);
+  }
+  cv.save("podfront.svg");
 }
 
 // An office chair seen from behind: the seat peeking over a padded back, a stem and wheels.
@@ -473,6 +494,8 @@ function poses() {
   out.back = [...BACK];
   // standing, back to us (at the window, at the cooler): the back of the torso over the legs
   out.standBack = [...BACK.slice(0, 15), ...FRONT.slice(15)];
+  // seated behind a monitor, facing us: head and shoulders (the monitor hides the rest)
+  out.typeFront = over(FRONT).slice(0, 16);
   out.typeA = [...BACK]; set(out.typeA, 9, 2, "S"); set(out.typeA, 10, 2, "T");
   out.typeB = [...BACK]; set(out.typeB, 9, 13, "S"); set(out.typeB, 10, 13, "T");
   const wave = (col, top) => {
@@ -552,7 +575,8 @@ for (const [name, over] of Object.entries(STYLES)) {
   // The night style is always night; the day styles get a sunset and a night wall.
   if (name !== "night") for (const phase of Object.keys(PHASES)) { wall("office", phase); wall("lounge", phase); }
   floorRow();
-  deskRow();
+  pod();
+  podFront();
   lounge();
   lounge(true);
   loungeFill();

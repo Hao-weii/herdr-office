@@ -2,9 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  WALL_H, ROW_H, LOUNGE_H, MEET_H, SCENE_W, DESK_X, QUEUE_X, QUEUE_Y, LOUNGE_SPOTS, PALETTES,
+  WALL_H, POD_H, POD_X, SEAT_X, LOUNGE_H, MEET_H, SCENE_W, QUEUE_X, QUEUE_Y, LOUNGE_SPOTS, PALETTES,
   paletteOf, task, spot, windowName, tokens, resetsIn, pickLayout, meetingOn, toolOf,
-  PER_ROW, seatBySpace, rugRects, errandSpot, WINDOW_X, phaseAt, clockText, DEMO,
+  menuItems, nextInQueue, DESK_PAD, tagWidth, packTags, seatAt, seatPlace, podRect, assignSeats, podsPerOffice, demoAgents, errandSpot, WINDOW_X, phaseAt, clockText, DEMO,
 } from "../mods/office/logic.js";
 
 const lo = { x: 0, y: 200 };
@@ -16,9 +16,12 @@ test("an agent keeps its look: same address, same palette, always in range", () 
   }
 });
 
-test("a working agent sits at its own desk, three desks to a row", () => {
-  assert.deepEqual(spot({ status: "working" }, 0, 0, lo), [DESK_X[0], WALL_H + 33, "type"]);
-  assert.deepEqual(spot({ status: "working" }, 4, 0, lo), [DESK_X[1], WALL_H + ROW_H + 33, "type"]);
+test("a working agent sits at its seat: near seats back to us, far seats facing us", () => {
+  assert.deepEqual(spot({ status: "working" }, 0, 0, lo), [POD_X[0] + SEAT_X[0], WALL_H + 51, "type"]);
+  assert.deepEqual(spot({ status: "working" }, 3, 0, lo), [POD_X[0] + SEAT_X[1], WALL_H + 3, "typeFront"]);
+  // Pod 1 is to the right of pod 0; pod 2 starts the next row.
+  assert.equal(spot({ status: "working" }, 4, 0, lo)[0], POD_X[1] + SEAT_X[0]);
+  assert.equal(spot({ status: "working" }, 8, 0, lo)[1], WALL_H + POD_H + 51);
 });
 
 test("agents that need the person queue at the person's desk: waiting left, finished right", () => {
@@ -38,7 +41,7 @@ test("idle agents fill the lounge spots in order, then go round again offset", (
 test("a narrow panel stacks the rooms, a wide one puts them side by side", () => {
   const narrow = pickLayout({ stageW: 380, stageH: 640, rows: 2, meet: false });
   assert.equal(narrow.wide, false);
-  assert.equal(narrow.h, WALL_H + 2 * ROW_H + LOUNGE_H);
+  assert.equal(narrow.h, WALL_H + 2 * POD_H + DESK_PAD + LOUNGE_H);
   const wide = pickLayout({ stageW: 860, stageH: 450, rows: 2, meet: false });
   assert.equal(wide.wide, true);
   assert.equal(wide.w, SCENE_W * 2);
@@ -55,7 +58,7 @@ test("a meeting adds the meeting room under the desks and moves the lounge down"
   const on = pickLayout({ stageW: 380, stageH: 640, rows: 2, meet: true, pref: "tall" });
   assert.equal(on.h - off.h, MEET_H);
   assert.equal(on.lo.y - off.lo.y, MEET_H);
-  assert.deepEqual(on.mo, { x: 0, y: WALL_H + 2 * ROW_H });
+  assert.deepEqual(on.mo, { x: 0, y: WALL_H + 2 * POD_H + DESK_PAD });
 });
 
 test("the room never shrinks below a readable scale", () => {
@@ -101,37 +104,58 @@ test("tools get their usual names", () => {
 
 const ag = (address, space) => ({ address, space, space_name: space });
 
-test("each space's agents sit together; a space that won't fit the rest of a row starts a new one", () => {
-  const { desk, groups, rows } = seatBySpace([ag("a1", "web"), ag("a2", "web"), ag("b1", "api"), ag("b2", "api"), ag("c1", "ops")]);
-  assert.deepEqual(groups.map((g) => g.name), ["web", "api", "ops"]);
-  assert.deepEqual([desk.a1, desk.a2], [0, 1]);
-  // Two api agents don't fit the one desk left on row 0, so they take row 1.
-  assert.deepEqual([desk.b1, desk.b2], [PER_ROW, PER_ROW + 1]);
-  // One ops agent fits the desk left on row 1.
-  assert.equal(desk.c1, PER_ROW + 2);
-  assert.equal(rows, 2);
+test("each space gets its own pod; a pod's four seats fill near side first", () => {
+  const { seats, owner, pods } = assignSeats([ag("a1", "web"), ag("a2", "web"), ag("b1", "api"), ag("a3", "web")]);
+  assert.deepEqual([seats.a1, seats.a2, seats.a3], [0, 1, 2]);
+  assert.equal(seats.b1, 4);
+  assert.deepEqual(owner, { 0: "web", 1: "api" });
+  assert.equal(pods, 2);
+  assert.equal(seatAt(0).north, false);
+  assert.equal(seatAt(2).north, true);
 });
 
-test("the room keeps at least two rows, and grows with the agents", () => {
-  assert.equal(seatBySpace([]).rows, 2);
-  assert.equal(seatBySpace([ag("a", "x")]).rows, 2);
-  assert.equal(seatBySpace(DEMO).rows, 4);
-  assert.equal(new Set(Object.values(seatBySpace(DEMO).desk)).size, DEMO.length);
+test("an agent keeps its seat when others come and go", () => {
+  const first = assignSeats([ag("a1", "web"), ag("b1", "api"), ag("b2", "api")]).seats;
+  // A new web agent and a departed one change nothing for the rest.
+  const next = assignSeats([ag("a0", "web"), ag("a1", "web"), ag("b2", "api")], first).seats;
+  assert.equal(next.a1, first.a1);
+  assert.equal(next.b2, first.b2);
+  assert.equal(next.a0, 1);
 });
 
-test("a rug covers a group's desks, one rectangle per row", () => {
-  const one = rugRects([0, 1]);
-  assert.equal(one.length, 1);
-  assert.equal(one[0].y, WALL_H + 1);
-  assert.ok(one[0].x < DESK_X[0] && one[0].x + one[0].w > DESK_X[1]);
-  const two = rugRects([2, 3, 4]);
-  assert.equal(two.length, 2);
-  assert.equal(two[1].y, WALL_H + ROW_H + 1);
-  // Neighbouring groups' rugs on one row don't overlap.
-  const [a] = rugRects([0]), [b] = rugRects([1]);
-  assert.ok(a.x + a.w <= b.x);
+test("a full pod sends its space to an empty pod, else a new one; a vacated pod is free again", () => {
+  const web = ["w1", "w2", "w3", "w4", "w5"].map((x) => ag(x, "web"));
+  const { seats, owner } = assignSeats([...web, ag("o1", "ops")]);
+  assert.equal(seats.w5, 4);
+  assert.equal(seats.o1, 8);
+  assert.deepEqual(owner, { 0: "web", 1: "web", 2: "ops" });
+  // Web shrinks to one pod: the next new space takes pod 1, not a new pod 3.
+  const later = assignSeats([ag("w1", "web"), ag("o1", "ops"), ag("x1", "x")], seats);
+  assert.equal(later.seats.x1, 4);
 });
 
+test("a seat someone clicked waits for its space's next agent", () => {
+  const { seats } = assignSeats([ag("a1", "web"), ag("a2", "web")], { a1: 0 }, Infinity, [{ space: "web", seat: 3 }]);
+  assert.equal(seats.a2, 3);
+  // Another space can't take it.
+  const other = assignSeats([ag("b1", "api")], {}, Infinity, [{ space: "web", seat: 0 }]);
+  assert.equal(other.seats.b1, 4);
+});
+
+test("pods sit two to a row, each with its rug rectangle", () => {
+  assert.equal(podRect(0).x, POD_X[0]);
+  assert.equal(podRect(1).x, POD_X[1]);
+  assert.equal(podRect(2).y, WALL_H + POD_H + 1);
+  assert.ok(podRect(0).x + podRect(0).w <= podRect(1).x);
+  assert.deepEqual(seatPlace(1), [POD_X[0] + SEAT_X[1], WALL_H + 51, "type"]);
+});
+
+test("the demo office has the size asked for, every agent seated once", () => {
+  assert.equal(demoAgents(30).length, 30);
+  const { seats } = assignSeats(demoAgents(30));
+  assert.equal(new Set(Object.values(seats)).size, 30);
+  assert.equal(DEMO.length, 9);
+});
 test("errands take an idle agent to the cooler, the window, the cat, or beside a coworker", () => {
   assert.deepEqual(errandSpot("water", lo), [lo.x + 9, lo.y + 22, "standBack"]);
   assert.equal(errandSpot("window", lo, 0)[0], WINDOW_X[0]);
@@ -149,4 +173,64 @@ test("the window follows the clock: day, sunset, night", () => {
   assert.equal(phaseAt(at(19)), "night");
   assert.equal(phaseAt(at(2)), "night");
   assert.equal(clockText(new Date(2026, 0, 1, 9, 5)), "09:05");
+});
+
+test("an office holds as many pods as fit at a readable size, at least one row", () => {
+  // A tall side panel fits more rows than a short one.
+  const tall = podsPerOffice({ stageW: 360, stageH: 900 });
+  const short = podsPerOffice({ stageW: 360, stageH: 380 });
+  assert.ok(tall > short);
+  assert.equal(short % 2, 0);
+  assert.ok(podsPerOffice({ stageW: 50, stageH: 50 }) >= 2);
+});
+
+test("a full office opens the next one; a space stays in its office while it has room", () => {
+  // Two pods per office: web takes pods 0 and 1, so api starts office 2 at pod 2.
+  const web = Array.from({ length: 7 }, (_, i) => ag(`w${i}`, "web"));
+  const { seats, offices } = assignSeats([...web, ag("a1", "api")], {}, 2);
+  assert.equal(Math.floor(seats.a1 / 4), 2);
+  assert.equal(offices, 2);
+  // An eighth web agent fills pod 1's last seat instead of moving to office 2.
+  const more = assignSeats([...web, ag("w7", "web"), ag("a1", "api")], seats, 2);
+  assert.equal(Math.floor(more.seats.w7 / 4), 1);
+  // A ninth: office 1 is full, so web opens a pod in office 2 next to api.
+  const ninth = assignSeats([...web, ag("w7", "web"), ag("w8", "web"), ag("a1", "api")], more.seats, 2);
+  assert.equal(Math.floor(ninth.seats.w8 / 4), 3);
+});
+
+test("the wall shows the space tags that fit in two lines, then a +N chip", () => {
+  const w = tagWidth("web");
+  assert.ok(tagWidth("網站") > tagWidth("ab"));
+  // Room for exactly two tags a line.
+  const width = 2 * w + 4;
+  assert.equal(packTags([w, w, w], width), 3);
+  assert.equal(packTags([w, w, w, w], width), 4);
+  // A fifth doesn't fit: three tags and the chip.
+  assert.equal(packTags([w, w, w, w, w], width, 2, 4, w), 3);
+  assert.equal(packTags([], width), 0);
+});
+
+test("the right-click menu fits the agent's status, stopping work last", () => {
+  const ids = (a) => menuItems(a).map((x) => x.id);
+  assert.equal(ids({ status: "blocked" })[0], "focus");
+  assert.ok(!ids({ status: "blocked" }).includes("dispatch"));
+  assert.equal(ids({ status: "working" })[0], "peek");
+  assert.ok(ids({ status: "working" }).includes("interrupt"));
+  assert.ok(!ids({ status: "idle" }).includes("interrupt"));
+  assert.equal(ids({ status: "idle" })[0], "dispatch");
+  assert.equal(ids({ status: "done" })[0], "focus");
+  for (const status of ["blocked", "done", "working", "idle"]) {
+    const items = menuItems({ status });
+    const firstDanger = items.findIndex((x) => x.danger);
+    if (firstDanger >= 0) assert.ok(items.slice(firstDanger).every((x) => x.danger));
+  }
+  assert.equal(menuItems({ status: "idle", pinned: true }).find((x) => x.id === "pin").label, "取消釘選");
+  assert.deepEqual(ids({ intern: true }), ["peek", "focus", "kill"]);
+});
+
+test("the next one at the person's desk: the longest-waiting blocked, else a finished one", () => {
+  const a = (address, status, seq) => ({ address, status, seq });
+  assert.equal(nextInQueue([a("d", "done", 1), a("b2", "blocked", 9), a("b1", "blocked", 3)]).address, "b1");
+  assert.equal(nextInQueue([a("w", "working", 1), a("d", "done", 5)]).address, "d");
+  assert.equal(nextInQueue([a("w", "working", 1)]), null);
 });
