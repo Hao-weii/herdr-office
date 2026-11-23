@@ -539,7 +539,7 @@ export default class Office extends View {
   }
 
   // An intern: a smaller character beside its parent, posed by its own status; hover for its task.
-  intern(x, i, parentPlace, s, key) {
+  intern(x, i, parentPlace, s, key, parent) {
     const k = 0.72, ks = s * k;
     const w = Math.round(16 * ks), h = Math.round(21 * ks);
     const OFF = [[-19, 0], [19, 0], [-28, 6], [28, 6]];
@@ -554,13 +554,17 @@ export default class Office extends View {
         ? this.sprite("cheer", pal, ks)
         : div().relative().w(w).h(h).child(div().absolute().left(0)
           .loop("top", { from: 0, to: x.status === "working" ? -1.5 * s : 0, period: 700 }).child(this.sprite("stand", pal, ks)));
-    const tip = x.kind === "claude" ? `子代理（${x.type}）：${x.text}` : `子 Agent（${x.type}）：${x.text}`;
+    // Claude Code's own subagents have no terminal of their own: they run inside the parent's
+    // session, so a click goes to the parent (right-click: the parent's menu).
+    const tip = x.kind === "claude" ? `子代理（${x.type}）：${x.text}\n點一下前往主代理` : `子 Agent（${x.type}）：${x.text}`;
     return div().id(`in-${x.id}-${key}`).absolute()
       .left(Math.round((px + dx) * s - w / 2)).top(Math.round(top * s)).w(w).h(h)
       .transition("left", WALK).transition("top", WALK)
       .tooltip(tip)
       .when(x.kind === "hc", (el) => el.on_click(() => run("terminal.peek", { terminal: x.id }))
         .on_mouse_down("right", (_e, cx) => { this.internMenu(x); cx.stop_propagation(); }))
+      .when(x.kind === "claude" && !!parent, (el) => el.on_click(() => run("agent.focus", { terminal: parent.address }))
+        .on_mouse_down("right", (_e, cx) => { this.menu(parent); cx.stop_propagation(); }))
       .child(figure);
   }
 
@@ -1213,7 +1217,7 @@ export default class Office extends View {
       .children(byDepth.map((p) => this.character(p.a, p.place, s, t, key, names[p.a.address], extra(p))))
       .children(this.pods(npods, s, true))
       .children(farPlates.map((p) => this.plate(p.a, p.seat, s, names[p.a.address])))
-      .children(placed.flatMap((p) => (interns[p.a.address] ?? []).slice(0, 4).map((x, i) => this.intern(x, i, p.place, s, key))))
+      .children(placed.flatMap((p) => (interns[p.a.address] ?? []).slice(0, 4).map((x, i) => this.intern(x, i, p.place, s, key, p.a))))
       .children(placed.filter((p) => (interns[p.a.address] ?? []).length > 4).map((p) => this.moreInterns(interns[p.a.address].length - 4, p.place, s)));
   }
 

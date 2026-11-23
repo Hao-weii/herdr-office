@@ -451,8 +451,10 @@ function renderScene(d, P) {
         : x.status === "done"
           ? sprite("cheer", pal, ks)
           : x.status === "working" ? bob(sprite("stand", pal, ks), w, h, 700, -1.5 * s) : sprite("stand", pal, ks);
-      const el = actor(ilayer, iseen, `in-${x.id}-${key}`, "intern", R((px + dx) * s - w / 2), R(top * s), w, h, fig);
-      el.title = x.kind === "claude" ? `子代理（${x.type}）：${x.text}` : `子 Agent（${x.type}）：${x.text}`;
+      // A click goes to the parent in Herdr: Claude Code's own subagents run inside its session.
+      const parent = p.a.address;
+      const el = actor(ilayer, iseen, `in-${x.id}-${key}`, "intern", R((px + dx) * s - w / 2), R(top * s), w, h, fig, () => focusAgent(parent));
+      el.title = `${x.kind === "claude" ? "子代理" : "子 Agent"}（${x.type}）：${x.text}\n點一下前往主代理`;
     });
     if (subs.length > 4) {
       const [px, py] = p.place;
