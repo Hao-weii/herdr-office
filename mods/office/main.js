@@ -57,6 +57,7 @@ const phaseNow = (hour = null) => styleOf().id === "night" ? "night"
 // The roster at its tallest (five rows, then it scrolls), and the office tabs row.
 const ROSTER_MAX = 5 * 28 + 12, TABS_H = 30;
 const RUGS = ["#6f9fd8", "#7fb07a", "#e9a24a", "#d9727a", "#a98bd6", "#5fb3b0"];
+const FRUIT_NAMES = { apple: "蘋果", apricot: "杏", pear: "梨", plum: "李", cherry: "櫻桃" };
 
 // Herdr draws mods only inside its one window, so the desktop window is a browser page
 // (web/server.mjs) that shows the office and can go on another screen.
@@ -1175,6 +1176,42 @@ export default class Office extends View {
     }
   }
 
+  waterTree(id, cx) {
+    const at = Date.now();
+    const watered = shared("office.orchard.watered") ?? {};
+    setShared("office.orchard.watered", { ...watered, [id]: at });
+    this.watering = { id, at };
+    cx.notify();
+    cx.timer.after(2200, (cx) => {
+      // A second click starts a fresh animation and keeps its own completion timer.
+      if (this.watering?.at === at && this.watering.id === id) {
+        this.watering = null;
+        cx.notify();
+      }
+    });
+  }
+
+  orchardTree(x, y, fruit, s, art) {
+    const px = (n) => Math.round(n * s);
+    const id = `${x},${y}`;
+    const at = shared("office.orchard.watered")?.[id];
+    const wateredAt = Number.isFinite(at) && at > 0 ? new Date(at).toLocaleString("zh-TW") : "尚未澆水";
+    const watering = this.watering?.id === id;
+    const ui = styleOf().ui;
+    return div().id(`orchard-${id}`).absolute().left(px(x - 12)).top(px(y)).w(px(24)).h(px(28))
+      .tooltip(`${FRUIT_NAMES[fruit]}樹 · 點一下澆水\n上次澆水：${wateredAt}`)
+      .hover((el) => el.bg("#79c8e433").rounded(px(4)))
+      .on_click((_e, cx) => this.waterTree(id, cx))
+      .child(image(`mods/office/img/${art}/orchard-${fruit}.svg`).w(px(24)).h(px(28)))
+      .when(watering, (el) => el
+        .child(div().absolute().left(px(4)).top(px(25)).w(px(16)).h(Math.max(2, px(3))).rounded(px(4)).bg("#488da999"))
+        .children([4, 11, 18].map((dx, i) => div().id(`water-drop-${id}-${this.watering.at}-${i}`)
+          .absolute().left(px(dx)).top(px(5 + i * 3)).w(Math.max(2, px(2))).h(Math.max(3, px(4)))
+          .rounded(px(2)).bg("#91e1ff").loop("top", { from: px(5 + i * 3), to: px(23), period: 500 + i * 130 })))
+        .child(div().absolute().top(px(-11)).left(px(-6)).h(17).px(5).rounded(6)
+          .bg(ui.label).border(1).border_color(ui.labelBorder).text_color(ui.text).text_size(10).child("澆好水了")));
+  }
+
   courtyard(list, t, P) {
     const s = Math.max(0, Math.min((this.stageW - 2) / COURT_W, (this.stageH - 2) / COURT_H));
     const px = (n) => Math.round(n * s);
@@ -1186,13 +1223,13 @@ export default class Office extends View {
     const interns = this.interns(visitors.map(({ a }) => a));
     this.trackWalk(visitors, key);
     const trees = ORCHARD.map(([x, y, fruit]) => ({ depth: y + 28,
-      element: div().absolute().left(px(x - 12)).top(px(y))
-        .child(image(`mods/office/img/${art}/orchard-${fruit}.svg`).w(px(24)).h(px(28))) }));
+      element: this.orchardTree(x, y, fruit, s, art) }));
     const actors = visitors.map(({ a, place }) => ({ depth: place[1] + (POSE_H[place[2]] ?? 21),
       element: this.character(a, place, s, t, key, names[a.address]) }));
     return div().relative().w(px(COURT_W)).h(px(COURT_H)).overflow_hidden()
       .child(image(`mods/office/img/${art}/courtyard.svg`).w(px(COURT_W)).h(px(COURT_H)))
       .when(phase === "dusk", (el) => el.child(div().absolute().size_full().bg("#d96a3426")))
+      .child(this.zone("點果樹澆水", 8, 8, s))
       .children([...trees, ...actors].sort((a, b) => a.depth - b.depth).map(({ element }) => element))
       .children(visitors.flatMap(({ a, place }) => (interns[a.address] ?? []).slice(0, 4).map((x, i) => this.intern(x, i, place, s, key, a))))
       .children(visitors.filter(({ a }) => (interns[a.address] ?? []).length > 4).map(({ a, place }) => this.moreInterns(interns[a.address].length - 4, place, s)));
