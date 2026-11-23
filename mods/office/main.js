@@ -846,14 +846,20 @@ export default class Office extends View {
           .child(name ? `${name} · ${task(a) || a.space_name}` : task(a) || a.space_name))
         .child(div().text_size(9.5).text_color(t.dim).child("左鍵前往 · 右鍵更多"))
       : extra === false ? null : extra ?? this.sign(a, t);
+    // The agent the person has picked: a ring at its feet and a mark over its head (above its
+    // sign, if any); hidden while hovered, where the label says who it is.
+    const picked = a.focused && !hovered;
     return div().id(`ag-${a.address}-${key}`).absolute()
       .left(Math.round(x * s - w / 2)).top(Math.round(y * s)).w(w).h(h)
       .transition("left", WALK).transition("top", WALK)
       .on_click(() => run("agent.focus", { terminal: a.address }))
       .on_mouse_down("right", (_e, cx) => { this.menu(a); cx.stop_propagation(); })
       .on_hover((on, cx) => { this.hovered = on ? a.address : this.hovered === a.address ? null : this.hovered; cx.notify(); })
+      .when(picked, (el) => el.child(div().absolute().left(-3).bottom(-2).w(w + 6).h(Math.max(3, Math.round(3 * s))).rounded(4).bg(`${t.accent}88`)))
       .child(this.figure(pose, pal, s))
-      .when(!!label, (el) => el.child(h_flex().absolute().top(hovered ? -36 : -22).left(-60).w(w + 120).justify_center().child(label)));
+      .when(!!label, (el) => el.child(h_flex().absolute().top(hovered ? -36 : -22).left(-60).w(w + 120).justify_center().child(label)))
+      .when(picked, (el) => el.child(h_flex().absolute().top(label ? -36 : -14).left(-20).w(w + 40).justify_center()
+        .child(div().text_size(11).text_color(t.accent).child("▼"))));
   }
 
   // The name on a desk, so an empty chair still says whose it is: under a near seat, on the back
@@ -1070,6 +1076,15 @@ export default class Office extends View {
     const officeOf = {};
     for (const a of list) officeOf[a.address] = Math.floor(A.seats[a.address] / per);
     const offices = Math.max(1, ...Object.values(officeOf).map((o) => o + 1));
+    // Follow the agent the person picks (in Herdr's agents list, a tab, anywhere): show its office
+    // once, when the pick changes, so browsing another floor afterwards isn't undone. A meeting is
+    // held on the first floor.
+    const focus = list.find((a) => a.focused)?.address ?? null;
+    if (focus !== this.lastFocus) {
+      this.lastFocus = focus;
+      const m = meetingOn(this.meeting) ? this.meeting : null;
+      if (focus) this.floor = m?.participants.includes(focus) ? 0 : officeOf[focus] ?? this.floor;
+    }
     this.floor = Math.max(0, Math.min(this.floor ?? 0, offices - 1));
     this.officeOf = officeOf;
     return { cap, A, per, officeOf, offices, floor: this.floor };

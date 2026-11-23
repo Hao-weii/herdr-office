@@ -79,6 +79,10 @@
   .legend { position: absolute; display: flex; flex-wrap: wrap; gap: 4px; }
   .tag { height: 16px; padding: 0 6px; border-radius: 5px; border: 1px solid #00000026; color: #fff; font-size: 10px; font-weight: 600; line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #front { pointer-events: none; }
+  .ring-pick { position: absolute; left: -3px; right: -3px; bottom: -2px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 55%, transparent); }
+  .pick { position: absolute; left: -20px; right: -20px; top: -14px; text-align: center; font-size: 11px; line-height: 12px; color: var(--accent); pointer-events: none; }
+  .pick.high { top: -36px; }
+  .char:hover .pick, .char:hover .ring-pick { display: none; }
   .yours { position: absolute; display: flex; justify-content: flex-end; pointer-events: none; }
   .yours .bubble { height: 18px; padding: 0 6px; border-radius: 9px; background: #fff; border: 1px solid #3a3a3c; color: #1c1c1e;
     font-size: 10.5px; line-height: 16px; max-width: 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

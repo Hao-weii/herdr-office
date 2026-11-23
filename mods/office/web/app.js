@@ -37,7 +37,7 @@ const setHtml = (el, html) => { if (el._html !== html) { el._html = html; el.inn
 
 let data = null;
 let stageW = 380, stageH = 640;
-let floor = 0, demoFloor = null, tabsShown = false;
+let floor = 0, demoFloor = null, tabsShown = false, lastFocus;
 let clock = clockText();
 const last = {}, walking = {};
 // Idle agents' errands (address -> { kind, with, until }), since when each has rested, and who is
@@ -269,6 +269,13 @@ function plan(d) {
   officeOf = {};
   for (const a of list) officeOf[a.address] = Math.floor(A.seats[a.address] / per);
   const offices = Math.max(1, ...Object.values(officeOf).map((o) => o + 1));
+  // Follow the agent picked in Herdr: show its office once, when the pick changes (as main.js).
+  const focus = list.find((a) => a.focused)?.address ?? null;
+  if (focus !== lastFocus) {
+    lastFocus = focus;
+    const m = meetingOn(d.meeting) ? d.meeting : null;
+    if (focus) floor = m?.participants.includes(focus) ? 0 : officeOf[focus] ?? floor;
+  }
   floor = Math.max(0, Math.min(floor, offices - 1));
   return { cap, A, per, offices, floor };
 }
@@ -414,8 +421,11 @@ function renderScene(d, P) {
     const name = names[a.address];
     const what = task(a) || a.space_name;
     const hover = `<div class="hover" style="border-color:var(--${a.status})"><div>${esc(name ? `${name} · ${what}` : what)}</div><small>點一下在 Herdr 裡前往</small></div>`;
+    // The agent picked in Herdr: a ring at its feet and a mark over its head (above its sign).
+    const ex = extra(p);
+    const picked = a.focused ? `<div class="ring-pick" style="height:${Math.max(3, R(3 * s))}px"></div><div class="pick${ex ? " high" : ""}">▼</div>` : "";
     const el = actor(layer, seenNow, `ag-${a.address}-${key}`, "char", R(x * s - w / 2), R(y * s), w, h,
-      figure(pose, paletteOf(a.address), s) + `<div class="label">${hover}${extra(p)}</div>`,
+      picked + figure(pose, paletteOf(a.address), s) + `<div class="label">${hover}${ex}</div>`,
       () => { focusAgent(a.address); });
     el.style.zIndex = String(10 + z);
   });
