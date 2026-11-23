@@ -23,9 +23,11 @@ import * as fs from "fs/promises";
 import {
   SCENE_W, WALL_H, LOUNGE_H, FILL_H, LOUNGE_SPOTS, QUEUE_X, QUEUE_Y, MEET_H, MEET_SEATS, TALK_MS, TOOL_NAMES, toolOf, meetingOn, POSE_H, PALETTES, WALK, STATUS, ORDER, paletteOf, clean, task, spot, windowName, tokens, resetsIn, pickLayout,
   POD_W, POD_H, PODS_PER_ROW, SEATS_PER_POD, DOOR, DESK_PAD, tagWidth, packTags, seatAt, podRect, assignSeats, podsPerOffice, demoAgents,
-  ERRANDS, ERRAND_MS, errandSpot, phaseAt, clockText, DEMO, menuItems, DISPATCH_TITLE, nextInQueue,
-  openFileCommand,
+  ERRANDS, ERRAND_MS, errandSpot, phaseAt, clockText, DEMO, menuItems, DISPATCH_TITLE, nextInQueue, isQuotaError,
+  openFileCommand, COURT_W, COURT_H, ORCHARD, courtyardRoute, courtyardStep,
 } from "./logic.js";
+
+const statusColor = (t, s) => t[s] ?? (s === "tired" ? "#a68bd4" : t.muted);
 
 // Looks the person can pick (art in img/<id>/), and how the room is laid out. Saved in shared state.
 const STYLES = [
@@ -135,6 +137,7 @@ export default class Office extends View {
     // Idle agents' errands (address -> { kind, with, until }) and since when each has rested.
     this.errands = {};
     this.rested = {};
+    this.showCourtyard = props()?.scene === "courtyard";
     // Newcomers standing in the doorway (address -> since).
     this.entering = {};
     this.clock = clockText();
@@ -155,13 +158,20 @@ export default class Office extends View {
       for (const [k, until] of Object.entries(this.walking)) if (until <= now) { delete this.walking[k]; done = true; }
       for (const [k, since] of Object.entries(this.entering)) if (now - since >= 300) { delete this.entering[k]; done = true; }
       this.saveSeats();
-      if (done) cx.notify();
+      if (done || this.courtyardNext <= now) cx.notify();
     });
   }
 
   // The agents to draw: the real ones, or the made-up office while previewing.
+  // Quota/rate-limit errors arrive from Herdr as `blocked`, so cross-check `terminals()` to
+  // mark them as `tired` (slumped at their own desk) instead of waiting for a reply.
   people() {
-    return this.demo ?? agents();
+    if (this.demo) return this.demo;
+    const byAddr = Object.fromEntries(terminals().map((t) => [t.address, t]));
+    return agents().map((a) => {
+      const term = byAddr[a.address];
+      return isQuotaError(term) ? { ...a, status: "tired", status_msg: term.report?.msg ?? "" } : a;
+    });
   }
 
   // ---------- actions ----------
@@ -422,18 +432,45 @@ export default class Office extends View {
       const working = who ? list.filter((a) => a.status === "working" && office(a) === office(who)) : [];
       // One at the cooler and one with the cat at a time per office; the window has room for a few.
       const taken = new Set(Object.entries(this.errands).filter(([k]) => byAddress[k] && who && office(byAddress[k]) === office(who)).map(([, e]) => e.kind));
-      const kinds = ["water", "window", "cat", "chat", "chat"].filter((k) =>
+      const kinds = ["water", "window", "cat", "chat", "chat", "courtyard"].filter((k) =>
         k === "window" || (k === "chat" ? working.length > 0 : !taken.has(k)));
       if (who && kinds.length) {
         const kind = pick(kinds);
-        this.errands[who.address] = {
-          kind, with: kind === "chat" ? pick(working).address : null,
-          until: now + WALK.duration + ERRAND_MS.min + Math.random() * (ERRAND_MS.max - ERRAND_MS.min),
-        };
+        if (kind === "courtyard") {
+          const area = pick(["walk", "walk", "terrace", "pond", "meadow", "tree"]);
+          const route = courtyardRoute(area, who.seq);
+          this.errands[who.address] = { kind, route, since: now, until: now + route.reduce((sum, step) => sum + step.duration, 0) };
+        } else {
+          this.errands[who.address] = {
+            kind, with: kind === "chat" ? pick(working).address : null,
+            until: now + WALK.duration + ERRAND_MS.min + Math.random() * (ERRAND_MS.max - ERRAND_MS.min),
+          };
+        }
         changed = true;
       }
     }
     if (changed) cx.notify();
+  }
+
+  courtyardTrips(list, meeting) {
+    const now = Date.now();
+    const trips = {};
+    this.courtyardNext = Infinity;
+    const talking = new Set((this.talks ?? []).flatMap(({ from, to }) => [from, to]));
+    for (const a of list) {
+      const trip = this.errands[a.address];
+      if (trip?.kind !== "courtyard" || a.status !== "idle") continue;
+      if (meeting?.participants.includes(a.address) || talking.has(a.address)) {
+        delete this.errands[a.address];
+        this.rested[a.address] = now;
+        continue;
+      }
+      const step = courtyardStep(trip.route, now - trip.since);
+      if (!step) continue;
+      trips[a.address] = step;
+      this.courtyardNext = Math.min(this.courtyardNext, trip.since + step.end);
+    }
+    return trips;
   }
 
   // What an agent on an errand is up to, over its head once it gets there.
@@ -532,7 +569,7 @@ export default class Office extends View {
       const app = term.report?.app ?? term.agent;
       (out[term.parent] ??= []).push({
         id: term.address, kind: "hc", type: TOOL_NAMES[app] ?? app ?? "agent", text: term.name ?? term.address,
-        status: term.status === "error" ? "blocked" : term.status,
+        status: isQuotaError(term) ? "tired" : term.status === "error" ? "blocked" : term.status,
       });
     }
     return out;
@@ -580,7 +617,7 @@ export default class Office extends View {
     this.topic = InputState.new({ value: "", placeholder: "例如：這個專案下一步該先做什麼？" });
     this.topic.focus();
     cx.timer.after(300, () => this.topic.focus());
-    this.picked = new Set(agents().filter((a) => a.status !== "blocked").map((a) => a.address));
+    this.picked = new Set(this.people().filter((a) => a.status !== "blocked" && a.status !== "tired").map((a) => a.address));
     this.rounds = 2;
     this.error = null;
     this.handle = cx.focus_handle();
@@ -631,7 +668,7 @@ export default class Office extends View {
     const t = theme();
     const p = props();
     const names = this.names();
-    const list = agents();
+    const list = this.people();
     const button = (id, text, primary, action) => h_flex().id(id).h(30).px(14).items_center().rounded(7)
       .border(1).border_color(primary ? t.solid : t.input).bg(primary ? t.solid : t.raised)
       .text_color(primary ? t.solid_foreground : t.foreground).text_size(12.5).hover((st) => st.opacity(0.88)).on_click(action).child(text);
@@ -644,7 +681,7 @@ export default class Office extends View {
       .child(Input.new(this.topic).w_full())
       .child(div().pt(4).text_size(11.5).text_color(t.dim).child("誰參加"))
       .child(v_flex().gap(2).children(list.map((a) => {
-        const on = this.picked.has(a.address), busy = a.status === "blocked";
+        const on = this.picked.has(a.address), busy = a.status === "blocked" || a.status === "tired";
         return h_flex().id(`pick-${a.address}`).h(28).px(6).gap(8).items_center().rounded(6)
           .hover((el) => el.bg(t.hover))
           .on_click((_e, cx) => { if (on) this.picked.delete(a.address); else this.picked.add(a.address); cx.notify(); })
@@ -653,7 +690,8 @@ export default class Office extends View {
           .child(image(`mods/office/img/head-${paletteOf(a.address)}.svg`).w(16).h(14).flex_none())
           .child(div().flex_1().min_w(0).truncate().text_size(12)
             .child(`${names[a.address] ? names[a.address] + " · " : ""}${toolOf(a)} · ${task(a) || a.space_name}`))
-          .when(busy, (el) => el.child(div().text_size(10.5).text_color(t.blocked).child("等你回覆中")));
+          .when(busy, (el) => el.child(div().text_size(10.5).text_color(statusColor(t, a.status))
+            .child(a.status === "tired" ? "沒精神中" : "等你回覆中")));
       })))
       .child(h_flex().pt(4).gap(8).items_center()
         .child(div().text_size(11.5).text_color(t.dim).child("發言幾輪"))
@@ -818,6 +856,9 @@ export default class Office extends View {
     // Facing us behind a monitor: only the head shows, nodding along as it types.
     if (pose === "typeFront") return div().relative().w(w).h(Math.round(16 * s))
       .child(div().absolute().left(0).loop("top", { from: 0, to: -0.7 * s, period: 520 }).child(this.sprite("typeFront", pal, s)));
+    // Slumped over the desk (out of quota): slow, heavy breathing.
+    if (pose === "slumpFront" || pose === "slumpBack") return div().relative().w(w).h(Math.round(16 * s))
+      .child(div().absolute().left(0).loop("top", { from: 0, to: 0.6 * s, period: 2200 }).child(this.sprite(pose, pal, s)));
     if (pose === "wave") return this.flip(this.sprite("waveA", pal, s), this.sprite("waveB", pal, s), w, Math.round(21 * s), 600);
     if (pose === "cheer") return div().relative().w(w).h(Math.round(21 * s))
       .child(div().absolute().left(0).loop("top", { from: 0, to: -3 * s, period: 600 }).child(this.sprite("cheer", pal, s)));
@@ -845,9 +886,10 @@ export default class Office extends View {
     const hovered = this.hovered === a.address;
     // Hovered: who it is, and what the mouse buttons do.
     const label = hovered
-      ? v_flex().px(6).py(2).rounded(5).bg(t.popover).border(1).border_color(t[a.status] ?? t.border).max_w(200)
+      ? v_flex().px(6).py(2).rounded(5).bg(t.popover).border(1).border_color(statusColor(t, a.status)).max_w(220)
         .child(div().text_size(11).text_color(t.foreground).truncate()
           .child(name ? `${name} · ${task(a) || a.space_name}` : task(a) || a.space_name))
+        .when(!!a.status_msg, (el) => el.child(div().text_size(9.5).text_color(statusColor(t, a.status)).truncate().child(a.status_msg)))
         .child(div().text_size(9.5).text_color(t.dim).child("左鍵前往 · 右鍵更多"))
       : extra === false ? null : extra ?? this.sign(a, t);
     // The agent the person has picked: a ring at its feet and a mark over its head (above its
@@ -1065,11 +1107,10 @@ export default class Office extends View {
   // ---------- offices ----------
 
   // The height the office size is worked out for: the stage as if the roster were full and the
-  // office tabs shown, so neither a newcomer nor the tabs appearing changes the size (and
-  // reshuffles everyone).
+  // navigation row shown, so a newcomer doesn't change the office size and reshuffle everyone.
   capHeight(n) {
     const roster = n > 0 ? Math.min(n * 28 + 12, ROSTER_MAX) : ROSTER_MAX;
-    return this.stageH - (ROSTER_MAX - roster) - (this.tabsShown ? 0 : TABS_H);
+    return this.stageH - (ROSTER_MAX - roster);
   }
 
   // Who is in which office, and which office is shown.
@@ -1080,52 +1121,87 @@ export default class Office extends View {
     const officeOf = {};
     for (const a of list) officeOf[a.address] = Math.floor(A.seats[a.address] / per);
     const offices = Math.max(1, ...Object.values(officeOf).map((o) => o + 1));
-    // Follow the agent the person picks (in Herdr's agents list, a tab, anywhere): show its office
-    // once, when the pick changes, so browsing another floor afterwards isn't undone. A meeting is
-    // held on the first floor.
+    const meeting = meetingOn(this.meeting) ? this.meeting : null;
+    const trips = this.courtyardTrips(list, meeting);
+    // Follow a newly selected agent once, so the person can browse afterwards.
     const focus = list.find((a) => a.focused)?.address ?? null;
     if (focus !== this.lastFocus) {
+      if (focus && this.lastFocus !== undefined) this.showCourtyard = !!trips[focus]?.place;
       this.lastFocus = focus;
-      const m = meetingOn(this.meeting) ? this.meeting : null;
-      if (focus) this.floor = m?.participants.includes(focus) ? 0 : officeOf[focus] ?? this.floor;
+      if (focus) this.floor = meeting?.participants.includes(focus) ? 0 : officeOf[focus] ?? this.floor;
     }
     this.floor = Math.max(0, Math.min(this.floor ?? 0, offices - 1));
     this.officeOf = officeOf;
-    return { cap, A, per, officeOf, offices, floor: this.floor };
+    return { cap, A, per, officeOf, offices, floor: this.floor, trips, meeting };
   }
 
-  // Go to the office someone is in.
+  // Go to the scene someone is in.
   goTo(address, P, cx) {
-    const f = P.officeOf[address];
-    if (f != null && f !== this.floor) { this.floor = f; cx?.notify(); }
+    const f = P.meeting?.participants.includes(address) ? 0 : P.officeOf[address];
+    if (f == null) return;
+    this.floor = f;
+    this.showCourtyard = !!P.trips[address]?.place;
+    cx?.notify();
   }
 
-  // The offices as tabs above the room: "1F · 8" and so on; one where somebody waits for the
-  // person gets a blinking red dot, so a wait on another floor doesn't go unseen.
+  // Each floor and the shared courtyard have a tab. Floors with waiting agents keep their red dot.
   officeTabs(list, P, t) {
     const by = Array.from({ length: P.offices }, () => ({ n: 0, blocked: 0 }));
     for (const a of list) { const o = by[P.officeOf[a.address]]; if (!o) continue; o.n++; if (a.status === "blocked") o.blocked++; }
-    return h_flex().id("office-tabs").flex_none().h(TABS_H).px(10).pt(8).gap(6).items_center()
-      .children(by.map((o, i) => {
-        const on = i === P.floor;
-        return h_flex().id(`office-tab-${i}`).h(22).px(8).gap(5).items_center().rounded(6).flex_none()
-          .bg(on ? t.selected : t.raised).border(1).border_color(on ? t.accent : t.border)
-          .text_size(11.5).text_color(on ? t.foreground : t.muted)
-          .when(!on, (el) => el.hover((st) => st.bg(t.hover)))
-          .tooltip(o.blocked ? `${i + 1} 樓：${o.n} 位，${o.blocked} 位等你回覆` : `${i + 1} 樓：${o.n} 位`)
-          .on_click((_e, cx) => { this.floor = i; cx.notify(); })
-          .child(div().font_semibold().child(`${i + 1}F`))
-          .child(div().text_color(t.dim).child(String(o.n)))
-          .when(o.blocked > 0, (el) => el.child(div().w(7).h(7).rounded(4).bg(t.blocked)
-            .loop("opacity", { from: 0.25, to: 1, period: 900 })));
-      }));
+    const tab = (id, label, on) => h_flex().id(id).h(22).px(8).gap(5).items_center().rounded(6).flex_none()
+      .bg(on ? t.selected : t.raised).border(1).border_color(on ? t.accent : t.border)
+      .text_size(11.5).text_color(on ? t.foreground : t.muted)
+      .when(!on, (el) => el.hover((st) => st.bg(t.hover)))
+      .child(div().font_semibold().child(label));
+    const outside = Object.values(P.trips).filter((step) => step.place).length;
+    return h_flex().id("office-tabs").flex_none().h(TABS_H).px(10).pt(8).gap(6).items_center().overflow_x_scroll()
+      .child(tab("office-tab-courtyard", "中庭", this.showCourtyard)
+        .on_click((_e, cx) => { this.showCourtyard = true; cx.notify(); })
+        .when(outside > 0, (el) => el.child(div().text_color(t.dim).child(String(outside)))))
+      .children(by.map((o, i) => tab(`office-tab-${i}`, P.offices === 1 ? "辦公室" : `${i + 1}F`, !this.showCourtyard && i === P.floor)
+        .on_click((_e, cx) => { this.floor = i; this.showCourtyard = false; cx.notify(); })
+        .child(div().text_color(t.dim).child(String(o.n)))
+        .when(o.blocked > 0, (el) => el.child(div().w(7).h(7).rounded(4).bg(t.blocked)
+          .tooltip(`${o.blocked} 位等你回覆`).loop("opacity", { from: 0.25, to: 1, period: 900 })))));
+  }
+
+  trackWalk(placed, key) {
+    const now = Date.now();
+    for (const { a, place: [x, y] } of placed) {
+      const prev = this.last[a.address], here = `${Math.round(x)},${Math.round(y)}`;
+      if (prev?.key !== key) delete this.walking[a.address];
+      else if (prev.at !== here) this.walking[a.address] = now + WALK.duration;
+      this.last[a.address] = { key, at: here };
+    }
+  }
+
+  courtyard(list, t, P) {
+    const s = Math.max(0, Math.min((this.stageW - 2) / COURT_W, (this.stageH - 2) / COURT_H));
+    const px = (n) => Math.round(n * s);
+    const phase = phaseNow(this.demoHour ?? null);
+    const art = phase === "night" ? "night" : styleOf().id;
+    const key = `courtyard-${Math.round(s * 100)}`;
+    const names = this.names();
+    const visitors = list.flatMap((a) => P.trips[a.address]?.place ? [{ a, place: P.trips[a.address].place }] : []);
+    const interns = this.interns(visitors.map(({ a }) => a));
+    this.trackWalk(visitors, key);
+    const trees = ORCHARD.map(([x, y, fruit]) => ({ depth: y + 28,
+      element: div().absolute().left(px(x - 12)).top(px(y))
+        .child(image(`mods/office/img/${art}/orchard-${fruit}.svg`).w(px(24)).h(px(28))) }));
+    const actors = visitors.map(({ a, place }) => ({ depth: place[1] + (POSE_H[place[2]] ?? 21),
+      element: this.character(a, place, s, t, key, names[a.address]) }));
+    return div().relative().w(px(COURT_W)).h(px(COURT_H)).overflow_hidden()
+      .child(image(`mods/office/img/${art}/courtyard.svg`).w(px(COURT_W)).h(px(COURT_H)))
+      .when(phase === "dusk", (el) => el.child(div().absolute().size_full().bg("#d96a3426")))
+      .children([...trees, ...actors].sort((a, b) => a.depth - b.depth).map(({ element }) => element))
+      .children(visitors.flatMap(({ a, place }) => (interns[a.address] ?? []).slice(0, 4).map((x, i) => this.intern(x, i, place, s, key, a))))
+      .children(visitors.filter(({ a }) => (interns[a.address] ?? []).length > 4).map(({ a, place }) => this.moreInterns(interns[a.address].length - 4, place, s)));
   }
 
   scene(all, t, P) {
-    this.arrivals(all);
     const { A, floor } = P;
     const base = floor * P.per;
-    const m = meetingOn(this.meeting) ? this.meeting : null;
+    const m = P.meeting;
     // A meeting is held on the first floor: its participants show there, whichever office is theirs.
     const meets = (a) => !!m && m.participants.includes(a.address);
     const list = all.filter((a) => (meets(a) ? floor === 0 : P.officeOf[a.address] === floor));
@@ -1136,7 +1212,7 @@ export default class Office extends View {
     const seats = m ? m.participants.filter((x) => list.some((a) => a.address === x)) : [];
     const L = this.layoutFor(rows, seats.length > 0), s = L.s, lo = L.lo, mo = L.mo;
     const phase = phaseNow(this.demoHour ?? null);
-    const count = { working: 0, blocked: 0, done: 0, idle: 0 };
+    const count = { working: 0, blocked: 0, done: 0, tired: 0, idle: 0 };
     const placed = list.map((a) => {
       const seat = local(a);
       const chair = seats.indexOf(a.address);
@@ -1145,13 +1221,16 @@ export default class Office extends View {
         return { a, seat, meeting: true, place: [mo.x + x, mo.y + y, pose] };
       }
       const key = a.status in count ? a.status : "idle";
-      return { a, seat, place: spot({ ...a, status: key }, seat, count[key]++, lo) };
+      const place = spot({ ...a, status: key }, seat, count[key]++, lo);
+      const trip = P.trips[a.address];
+      return { a, seat, place: trip ? [DOOR[0], DOOR[1], "stand"] : place, trip };
     });
+    const inside = placed.filter((p) => !p.trip?.place);
     // Whoever just messaged a teammate walks over and stands beside it.
     const talkOf = {};
     for (const x of this.talks ?? []) talkOf[x.from] = x;
-    const at = Object.fromEntries(placed.map((p) => [p.a.address, p]));
-    for (const p of placed) {
+    const at = Object.fromEntries(inside.map((p) => [p.a.address, p]));
+    for (const p of inside) {
       const x = talkOf[p.a.address], to = x && at[x.to];
       if (!to || p.meeting || to === p) continue;
       p.talk = x;
@@ -1159,24 +1238,19 @@ export default class Office extends View {
     }
     // Idle agents out on an errand. Their sofa stays theirs, so nobody else shuffles over.
     let atWindow = 0;
-    for (const p of placed) {
+    for (const p of inside) {
       const e = this.errands?.[p.a.address];
-      if (!e || p.meeting || p.talk || p.a.status !== "idle") continue;
+      if (!e || e.kind === "courtyard" || p.meeting || p.talk || p.a.status !== "idle") continue;
       const place = errandSpot(e.kind, lo, e.kind === "window" ? atWindow++ : 0, e.with ? at[e.with]?.place : null);
       if (!place) continue;
       p.place = [Math.min(place[0], L.w - 9), place[1], place[2]];
       p.errand = e;
     }
     // Newcomers start in the doorway.
-    for (const p of placed) if (this.entering[p.a.address] && !p.meeting) p.place = [DOOR[0], DOOR[1], "stand"];
+    for (const p of inside) if (this.entering[p.a.address] && !p.meeting) p.place = [DOOR[0], DOOR[1], "stand"];
     // Same layout and scale as last time and a new spot: the agent walks there.
-    const key = `${L.wide ? "w" : "t"}${Math.round(s * 100)}`;
-    const now = Date.now();
-    for (const p of placed) {
-      const prev = this.last[p.a.address], here = `${Math.round(p.place[0])},${Math.round(p.place[1])}`;
-      if (prev && prev.key === key && prev.at !== here) this.walking[p.a.address] = now + WALK.duration;
-      this.last[p.a.address] = { key, at: here };
-    }
+    const key = `${floor}-${L.wide ? "w" : "t"}${Math.round(s * 100)}`;
+    this.trackWalk(inside, key);
     const names = this.names();
     const interns = this.interns(list);
     const colors = this.spaceColors(all);
@@ -1194,16 +1268,19 @@ export default class Office extends View {
     const npods = rows * PODS_PER_ROW;
     // A far seat's plate sits on its monitor's back, where its owner's face would be: shown only
     // while the owner is away from the desk.
-    const seated = (p) => p.place[2] === "typeFront" && !this.walking[p.a.address];
+    const seated = (p) => (p.place[2] === "typeFront" || p.place[2] === "slumpFront") && !this.walking[p.a.address];
     const farPlates = placed.filter((p) => p.seat != null && seatAt(p.seat).north && !seated(p));
     // Farther back draws first, so nearer characters overlap them.
-    const byDepth = [...placed].sort((p, q) => p.place[1] - q.place[1]);
+    const byDepth = [...inside].sort((p, q) => p.place[1] - q.place[1]);
+    const gateOpen = inside.some((p) => p.trip);
     return div().relative().w(Math.round(L.w * s)).h(Math.round(L.h * s)).overflow_hidden()
       .child(this.room(L, rows, s, phase))
+      .when(gateOpen, (el) => el.child(div().absolute().left(Math.round(89 * s)).top(Math.round(4 * s))
+        .child(image(`mods/office/img/${phase === "night" ? "night" : styleOf().id}/door-open.svg`).w(Math.round(22 * s)).h(Math.round(40 * s)))))
       .children(this.rugs(owner, colors, s))
       .children(this.pods(npods, s, false, Object.fromEntries(Object.entries(owner).map(([pod, space]) => [pod, `${spaceNames[space] ?? space} · ${counts[space] ?? 0} 位`]))))
       .when(L.wide, (el) => el.children(this.divider(L, s)))
-      .children(this.light(L, phase, s, placed))
+      .children(this.light(L, phase, s, inside))
       .child(this.wallClock(phase, s))
       // The spaces' tags name the work area; with nobody in, the plain label does.
       .child(legend.length ? this.spaceLegend(legend, colors, counts, s) : this.zone("工作區", 4, 6, s))
@@ -1211,35 +1288,39 @@ export default class Office extends View {
       .child(this.deskLabel(list, lo, s))
       .children(this.yourBubbles(list, lo, names, t, s))
       .when(!!L.meet, (el) => el.child(this.zone("會議室", mo.x + 150, mo.y + 47, s)))
-      .children(placed.filter((p) => !p.meeting && !p.talk && p.seat != null).map((p) => this.screen(p.a, p.seat, s)).filter(Boolean))
+      .children(inside.filter((p) => !p.meeting && !p.talk && p.seat != null).map((p) => this.screen(p.a, p.seat, s)).filter(Boolean))
       .children(placed.filter((p) => p.seat != null && !seatAt(p.seat).north).map((p) => this.plate(p.a, p.seat, s, names[p.a.address])))
       .children(this.seatSpots(npods, new Set(all.filter((a) => P.officeOf[a.address] === floor).map((a) => A.seats[a.address] - base)), owner, spaceNames, base, P.cap, s, t))
       .children(byDepth.map((p) => this.character(p.a, p.place, s, t, key, names[p.a.address], extra(p))))
       .children(this.pods(npods, s, true))
       .children(farPlates.map((p) => this.plate(p.a, p.seat, s, names[p.a.address])))
-      .children(placed.flatMap((p) => (interns[p.a.address] ?? []).slice(0, 4).map((x, i) => this.intern(x, i, p.place, s, key, p.a))))
-      .children(placed.filter((p) => (interns[p.a.address] ?? []).length > 4).map((p) => this.moreInterns(interns[p.a.address].length - 4, p.place, s)));
+      .children(inside.flatMap((p) => (interns[p.a.address] ?? []).slice(0, 4).map((x, i) => this.intern(x, i, p.place, s, key, p.a))))
+      .children(inside.filter((p) => (interns[p.a.address] ?? []).length > 4).map((p) => this.moreInterns(interns[p.a.address].length - 4, p.place, s)));
   }
 
   roster(list, t, P) {
     const sorted = [...list].sort((x, y) => (ORDER[x.status] ?? 9) - (ORDER[y.status] ?? 9) || y.seq - x.seq);
     const names = this.names();
     const interns = this.interns(list);
+    const locations = P.offices > 1 || Object.values(P.trips).some((step) => step.place);
     // Compact rows; past five agents the list scrolls on its own, the room stays put.
     return div().id("office-roster").flex_none().max_h(ROSTER_MAX).overflow_y_scrollbar()
       .child(v_flex().px(10).py(6)
         .children(sorted.map((a) => {
-          const color = t[a.status] ?? t.idle;
+          const color = statusColor(t, a.status);
           const name = names[a.address];
+          const outside = !!P.trips[a.address]?.place;
+          const here = outside ? this.showCourtyard : !this.showCourtyard && P.officeOf[a.address] === P.floor;
+          const tip = [a.space_name, a.program?.name ?? a.app ?? "", a.status_msg].filter(Boolean).join(" · ");
           return h_flex().id(`row-${a.address}`).h(28).px(6).gap(8).items_center().rounded(6)
-            .tooltip(`${a.space_name} · ${a.program?.name ?? a.app ?? ""}`)
+            .tooltip(tip)
             .when(a.focused, (el) => el.bg(t.raised))
             .hover((el) => el.bg(t.hover))
             .on_click((_e, cx) => { run("agent.focus", { terminal: a.address }); this.goTo(a.address, P, cx); })
             .on_mouse_down("right", (_e, cx) => { this.menu(a); cx.stop_propagation(); })
             .child(image(`mods/office/img/head-${paletteOf(a.address)}.svg`).w(18).h(16).flex_none())
-            .when(P.offices > 1, (el) => el.child(div().flex_none().w(22).text_size(10.5).font_semibold()
-              .text_color(P.officeOf[a.address] === P.floor ? t.foreground : t.dim).child(`${P.officeOf[a.address] + 1}F`)))
+            .when(locations, (el) => el.child(div().flex_none().w(25).text_size(10.5).font_semibold()
+              .text_color(here ? t.foreground : t.dim).child(outside ? "中庭" : `${P.officeOf[a.address] + 1}F`)))
             .child(h_flex().flex_1().min_w(0).gap(6).items_center()
               .when(!!name, (el) => el.child(div().flex_none().text_size(12).font_semibold().text_color(t.foreground).child(name)))
               .child(div().flex_1().min_w(0).text_size(12).text_color(name ? t.muted : t.foreground).truncate().child(task(a) || a.space_name))
@@ -1310,14 +1391,14 @@ export default class Office extends View {
     const count = (s) => list.filter((a) => a.status === s).length;
     const overlay = props()?.overlay;
     // With more than one office, a status count takes you to the office of the first one in it.
-    const jump = (s) => P.offices > 1 && s !== "idle";
+    const jump = (s) => (P.offices > 1 || this.showCourtyard) && s !== "idle";
     return h_flex().h(34).px(12).gap(10).items_center().flex_none().border_b(1).border_color(t.border)
       .child(div().text_size(13).font_semibold().text_color(t.foreground).child("辦公室"))
-      .child(h_flex().flex_1().gap(8).children(["blocked", "done", "working", "idle"].filter((s) => count(s)).map((s) =>
+      .child(h_flex().flex_1().gap(8).children(["blocked", "done", "working", "tired", "idle"].filter((s) => count(s)).map((s) =>
         h_flex().id(`count-${s}`).gap(4).px(3).rounded(4).items_center().text_size(11).text_color(t.muted)
           .when(jump(s), (el) => el.hover((st) => st.bg(t.hover)).tooltip(`到${STATUS[s].label}的人所在的辦公室`)
             .on_click((_e, cx) => this.goTo(list.find((a) => a.status === s)?.address, P, cx)))
-          .child(div().w(6).h(6).rounded(3).bg(t[s]))
+          .child(div().w(6).h(6).rounded(3).bg(statusColor(t, s)))
           .child(`${STATUS[s].label} ${count(s)}`))))
       .child(this.meetingControl(t))
       .child(div().id("office-settings").p(4).rounded(5).tooltip("設定")
@@ -1339,19 +1420,20 @@ export default class Office extends View {
     if (props()?.confirm) return this.renderConfirm();
     const t = theme();
     const list = this.people();
+    this.arrivals(list);
     const P = this.plan(list);
-    this.tabsShown = P.offices > 1;
     // The room takes whatever height is left and scales to fit it both ways.
     return v_flex().size_full().overflow_hidden().bg(t.surface)
       .child(this.header(list, t, P))
       .child(this.usageStrip(t))
-      .when(P.offices > 1, (el) => el.child(this.officeTabs(list, P, t)))
+      .child(this.officeTabs(list, P, t))
       .child(h_flex().id("office-stage").flex_1().min_h(0).w_full().px(10).pt(8).justify_center().items_center().overflow_hidden()
         .on_size_change((size, cx) => {
           const w = Math.floor(size.width) - 20, h = Math.floor(size.height) - 8;
           if (w !== this.stageW || h !== this.stageH) { this.stageW = w; this.stageH = h; cx.notify(); }
         })
-        .child(div().rounded(8).overflow_hidden().border(1).border_color(t.border).child(this.scene(list, t, P))))
+        .child(div().rounded(8).overflow_hidden().border(1).border_color(t.border)
+          .child(this.showCourtyard ? this.courtyard(list, t, P) : this.scene(list, t, P))))
       .when(list.length > 0, (el) => el.child(this.roster(list, t, P)))
       .when(list.length === 0, (el) => el.child(v_flex().flex_none().p(16).gap(4).items_center().text_size(12).text_color(t.muted)
         .child("辦公室還沒有人上班")

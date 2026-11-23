@@ -1,5 +1,5 @@
-// Draws the office: room pieces (wall, a row of desks, the lounge) and the characters,
-// as pixel SVGs in ../img/. Original art, drawn here in code; three styles, outlined shapes.
+// Draws the office, courtyard and characters as pixel SVGs in ../img/.
+// Original art, drawn here in code; three styles, outlined shapes.
 // Run from ~/.config/herdr-app:  node mods/office/art/generate.mjs
 
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
@@ -33,6 +33,12 @@ const BASE = {
   lampShade: "#ffffff", glow: false, stars: false,
   mug: "#ffffff", coffee: "#7a5236", book: ["#a3b8c9", "#d9a77a", "#9cc584", "#c9b6d9", "#e5e5ea"],
   cat: "#e59a4c", catLo: "#c27a33", catHi: "#f4c08a",
+  grass: "#94b879", grassHi: "#a0c284", grassLo: "#7da465",
+  hill: "#769c61", hillHi: "#99b879", hillLo: "#5d8251",
+  gravel: "#e3d9bc", gravelEdge: "#aab286", gravelSpeck: "#c2b697",
+  pond: "#579baf", pondDeep: "#46869e", pondEdge: "#447a7e", pondRipple: "#a2d4d5",
+  flower: "#f3edcc", flowerCenter: "#dbac65",
+  orchardLeaves: ["#709e54", "#89a867", "#71a173", "#628b6e", "#819e51"],
 };
 
 const STYLES = {
@@ -50,6 +56,12 @@ const STYLES = {
     pot: "#c4703f", potHi: "#d98c5a", potLo: "#9a5530",
     chairSeat: "#8bb985", chairBack: "#557a52", chairBackHi: "#6f9a6a",
     lampShade: "#f6d58b", book: ["#d0605e", "#5b8fc7", "#e3a646", "#6aa86a", "#9a72c2"],
+    grass: "#9bac73", grassHi: "#a9b680", grassLo: "#83955e",
+    hill: "#7a9157", hillHi: "#9faa6f", hillLo: "#607849",
+    gravel: "#e6ceb0", gravelEdge: "#b4a17b", gravelSpeck: "#c8ad8b",
+    pond: "#568e91", pondDeep: "#467a83", pondEdge: "#476f60", pondRipple: "#a8c9bd",
+    flower: "#f5dfb1", flowerCenter: "#d79a5a",
+    orchardLeaves: ["#7e994e", "#a3aa59", "#6a9b67", "#638264", "#8d9b54"],
   },
   // After dark: a starry sky, tree shadows, dark floor and furniture, warm lamp light.
   night: {
@@ -67,6 +79,12 @@ const STYLES = {
     pot: "#4a4f5a", potHi: "#5a606c", potLo: "#3a3e48",
     chairSeat: "#5a6170", chairBack: "#3a4050", chairBackHi: "#4a5262",
     lampShade: "#ffe39a", glow: true, stars: true, mug: "#d8d8dc",
+    grass: "#2e4947", grassHi: "#365451", grassLo: "#253e3e",
+    hill: "#29483f", hillHi: "#3c5c50", hillLo: "#203632",
+    gravel: "#737b80", gravelEdge: "#445555", gravelSpeck: "#616c74",
+    pond: "#2c5167", pondDeep: "#234258", pondEdge: "#213a48", pondRipple: "#7ea9b3",
+    flower: "#9eabb6", flowerCenter: "#b9a579",
+    orchardLeaves: ["#345847", "#445a43", "#386052", "#344d50", "#435c47"],
   },
 };
 
@@ -79,6 +97,10 @@ class Canvas {
   constructor(w, h) { this.w = w; this.h = h; this.parts = []; }
   circle(cx, cy, r, fill) { this.parts.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" shape-rendering="geometricPrecision"/>`); return this; }
   rect(x, y, w, h, fill) { if (w > 0 && h > 0) this.parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`); return this; }
+  stroke(points, width, color) {
+    this.parts.push(`<polyline points="${points.map((p) => p.join(",")).join(" ")}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    return this;
+  }
   // An outlined block with a lit top row and a shaded bottom row.
   box(x, y, w, h, fill, hi, lo, line = C.line) {
     this.rect(x, y, w, h, line).rect(x + 1, y + 1, w - 2, h - 2, fill);
@@ -334,6 +356,180 @@ function glassPanel(cv, x, y, w, h) {
   else for (let i = 6; i < h - 6; i += 30) cv.rect(x + 1, y + i, 1, 8, C.glassHi);
 }
 
+// ---------- courtyard ----------
+
+// Pixel ellipses use the centers of unit squares, like the sprite maps.
+function ellipseReach(y, cy, rx, ry) {
+  const dy = (y + 0.5 - cy) / ry;
+  return rx * Math.sqrt(Math.max(0, 1 - dy * dy));
+}
+
+function ellipse(cv, cx, cy, rx, ry, fill) {
+  for (let y = cy - ry; y < cy + ry; y++) {
+    const half = Math.floor(ellipseReach(y, cy, rx, ry) + 0.5);
+    cv.rect(cx - half, y, half * 2, 1, fill);
+  }
+}
+
+function courtyardHill(cv) {
+  // The offset cutout leaves a crescent on the north and east banks.
+  for (let y = 24; y <= 48; y++) {
+    const outside = Math.round(ellipseReach(y, 56, 39, 32));
+    const inside = Math.round(ellipseReach(y, 61, 35, 26));
+    const west = 160 - outside, east = Math.min(160 + outside, 190 + (48 - y) * 2);
+    const slopes = y < 35 ? [[west, east]] : [[west, 151 - inside], [151 + inside, east]];
+    for (const [left, right] of slopes) {
+      cv.rect(left, y, right - left, 1, C.hillLo);
+      if (y > 24 && y < 48) cv.rect(left + 1, y, right - left - 2, 1, C.hill);
+      if (y >= 27 && y < 35) cv.rect(left + 5, y, right - left - 12, 1, C.hillHi);
+    }
+  }
+  ellipse(cv, 158, 58, 28, 15, C.pondEdge);
+  ellipse(cv, 158, 58, 27, 14, C.pond);
+  ellipse(cv, 160, 60, 23, 11, C.pondDeep);
+  for (const [x, y, w] of [[149, 47, 13], [139, 51, 7], [161, 53, 10], [151, 57, 7], [167, 62, 9], [142, 65, 7], [154, 69, 14]]) {
+    cv.rect(x, y, w, 1, C.pondRipple);
+  }
+  for (const [x, y] of [[132, 56], [140, 69], [176, 67], [182, 56]]) {
+    cv.map(x, y - 3, [".l..", ".l.l", "ll.l", ".ll."], { l: C.hillLo });
+  }
+  for (const [x, y, size] of [[132, 24, 0], [155, 21, 1], [181, 29, 1]]) {
+    ellipse(cv, x + 6, y + 18, 6, 2, C.hillLo);
+    tree(cv, x, y, size);
+  }
+}
+
+const COURTYARD_PATH = [[100, 246], [100, 214], [86, 190], [92, 166], [118, 150], [140, 128], [128, 104], [104, 92], [96, 70], [118, 82]];
+
+function courtyardPath(cv) {
+  const loop = [...COURTYARD_PATH.slice(2), COURTYARD_PATH[2]];
+  const approach = COURTYARD_PATH.slice(0, 3);
+  cv.stroke(loop, 10, C.gravelEdge).stroke(approach, 10, C.gravelEdge);
+  cv.stroke(loop, 8, C.gravel).stroke(approach, 8, C.gravel);
+  for (const run of [approach, loop]) {
+    for (let i = 1; i < run.length; i++) {
+      const [x, y] = run[i - 1], [endX, endY] = run[i];
+      const dx = endX - x, dy = endY - y, length = Math.hypot(dx, dy);
+      for (let d = 3; d < length; d += 3) {
+        const offset = (d + i) % 5 - 2;
+        const px = Math.round(x + (dx * d - dy * offset) / length);
+        const py = Math.round(y + (dy * d + dx * offset) / length);
+        cv.rect(px, py, d % 2 ? 2 : 1, 1, C.gravelSpeck);
+      }
+    }
+  }
+}
+
+function terraceTable(cv, x, y) {
+  for (const dx of [-10, 10]) {
+    for (const top of [y - 10, y + 7]) {
+      const left = x + dx - 5;
+      cv.rect(left, top + 8, 11, 2, C.shadow);
+      cv.box(left + 1, top, 8, 9, C.chairSeat, C.chairBackHi, null);
+      cv.box(left, top === y - 10 ? top : top + 6, 10, 3, C.chairBack);
+    }
+  }
+  ellipse(cv, x + 1, y + 3, 13, 8, C.shadow);
+  ellipse(cv, x, y + 2, 12, 7, C.line);
+  ellipse(cv, x, y, 12, 7, C.line);
+  ellipse(cv, x, y, 11, 6, C.oak);
+  cv.rect(x - 6, y - 5, 12, 1, C.oakHi).rect(x - 8, y + 4, 16, 1, C.oakLo);
+  cv.rect(x - 3, y - 1, 2, 2, C.mug).rect(x + 3, y + 1, 2, 2, C.mug);
+}
+
+function courtyardFacade(cv) {
+  cv.rect(0, 248, 200, 32, C.aluLo);
+  for (const [x, w] of [[0, 30], [30, 30], [60, 29], [111, 29], [140, 30], [170, 30]]) {
+    glassPanel(cv, x, 252, w, 25);
+    cv.map(x + 8, 256, ["...hh.", "..hh..", ".hh..h", "hh..h.", "...h..", "..h..."], { h: C.glassHi });
+  }
+  cv.rect(0, 248, 200, 2, C.sill).rect(0, 250, 200, 1, C.sillLo);
+  cv.rect(0, 277, 200, 2, C.sill).rect(0, 279, 200, 1, C.line);
+  cv.box(89, 248, 22, 32, C.alu, C.sill, C.aluLo);
+  glassPanel(cv, 91, 251, 18, 26);
+  cv.rect(99, 252, 1, 24, C.alu).rect(100, 252, 1, 24, C.aluLo);
+  cv.rect(102, 260, 2, 7, C.line).rect(102, 260, 1, 6, C.alu);
+  cv.rect(91, 277, 18, 1, C.sill);
+}
+
+function courtyard() {
+  const cv = new Canvas(200, 280);
+  cv.rect(0, 0, 200, 200, C.grass);
+  for (const [x, y, rx, ry] of [[33, 69, 24, 15], [59, 80, 25, 16], [29, 117, 24, 17], [55, 118, 28, 20], [42, 154, 33, 23], [71, 165, 18, 15], [160, 153, 32, 25], [184, 168, 16, 20]]) {
+    ellipse(cv, x, y, rx, ry, C.grassHi);
+  }
+  for (let i = 0; i < 310; i++) {
+    const x = (i * 73 + 17) % 198, y = (i * 47 + Math.floor(i / 7) * 13) % 198;
+    cv.rect(x, y, i % 3 ? 2 : 1, 1, i % 4 ? C.grassLo : C.grassHi);
+  }
+  for (const [x, y] of [[7, 40], [19, 183], [54, 191], [111, 172], [120, 109], [149, 111], [154, 147], [173, 119], [188, 144], [183, 192], [135, 180]]) {
+    cv.map(x, y, [".f....", "fcf...", ".f...f", "....fc", ".....l"], { f: C.flower, c: C.flowerCenter, l: C.grassLo });
+  }
+  // The hedge follows the far end of the garden.
+  cv.rect(0, 0, 200, 10, C.hillLo).rect(0, 0, 200, 2, C.aluLo);
+  for (let x = 0; x < 200; x += 14) {
+    ellipse(cv, x + 4, 10, 11, 10, C.treeB);
+    ellipse(cv, x + 3, 8, 8, 6, C.treeA);
+    ellipse(cv, x + 10, 15, 8, 7, C.hillLo);
+    ellipse(cv, x + 9, 14, 6, 5, C.hill);
+    cv.rect(x + 6, 12, 4, 1, C.treeC);
+  }
+  courtyardHill(cv);
+
+  floor(cv, 0, 200, 200, 48);
+  cv.rect(0, 200, 200, 1, C.sill).rect(0, 201, 200, 1, C.sillLo);
+  courtyardPath(cv);
+  for (const x of [40, 100, 160]) terraceTable(cv, x, 224);
+  plant(cv, 6, 226);
+  plant(cv, 184, 226);
+  courtyardFacade(cv);
+  cv.save("courtyard.svg");
+}
+
+// Each crown has its own silhouette, with branches and bare space below for the next sprite.
+const ORCHARD_CROWNS = {
+  apple: [[7, 10, 6, 7], [12, 8, 7, 7], [17, 11, 6, 7], [11, 14, 8, 5]],
+  apricot: [[6, 12, 5, 6], [11, 7, 6, 6], [17, 10, 6, 6], [14, 15, 8, 5]],
+  pear: [[12, 6, 4, 5], [11, 11, 6, 7], [14, 14, 7, 6], [9, 15, 6, 5]],
+  plum: [[7, 10, 6, 7], [13, 7, 6, 6], [18, 12, 5, 7], [12, 15, 7, 5]],
+  cherry: [[6, 10, 5, 6], [11, 7, 6, 6], [17, 8, 6, 6], [17, 14, 6, 5], [8, 15, 7, 4]],
+};
+const ORCHARD_TRUNK = ["tt...t", ".tt.tt", "..tTt.", "..tT..", "..tT..", "..tT..", "..tT..", ".ttTt.", "tttTtt"];
+
+function orchard(kind, lobes, leaf) {
+  const cv = new Canvas(24, 28);
+  ellipse(cv, 13, 25, 10, 3, C.shadow);
+  const rows = Array.from({ length: 28 }, (_, y) => Array.from({ length: 24 }, (_, x) => {
+    for (const [cx, cy, rx, ry] of lobes) {
+      const dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry;
+      if (dx * dx + dy * dy > 1) continue;
+      if ((dx + 0.25) ** 2 + (dy + 0.38) ** 2 < 0.26) return "h";
+      return dy > 0.47 ? "s" : "l";
+    }
+    return ORCHARD_TRUNK[y - 16]?.[x - 9] ?? ".";
+  }).join(""));
+  cv.map(0, 0, outline(rows), { "#": C.hillLo, h: C.treeC, s: C.treeB, l: leaf, t: C.trunk, T: C.oakLo });
+  cv.save(`orchard-${kind}.svg`);
+}
+
+// An opaque replacement for wall.svg's door at (89, 4). The jamb and rail on the
+// right cover the edge of the glass leaf as it slides into the wall pocket.
+function doorOpen() {
+  const cv = new Canvas(22, 40);
+  cv.rect(0, 0, 22, 40, C.line).rect(2, 3, 17, 34, C.grass);
+  cv.rect(2, 3, 17, 10, C.sky).rect(2, 12, 17, 5, C.far);
+  tree(cv, 3, 8, 0);
+  cv.rect(2, 26, 17, 11, C.grass);
+  cv.stroke([[15, 25], [12, 30], [11, 37]], 6, C.gravel);
+  cv.map(3, 28, [".l...l", "lll.ll", "..l..l"], { l: C.grassLo });
+  cv.rect(1, 1, 20, 2, C.alu).rect(1, 3, 1, 34, C.alu);
+  cv.rect(18, 3, 1, 34, C.glassSolid).rect(19, 3, 2, 34, C.aluLo);
+  cv.rect(18, 17, 1, 7, C.aluLo);
+  cv.rect(1, 37, 20, 1, C.sill).rect(1, 38, 20, 1, C.aluLo);
+  cv.rect(0, 39, 22, 1, C.line);
+  cv.save("door-open.svg");
+}
+
 // The lower room: the lounge on the left (idle agents) and your desk on the right, where
 // agents that need you queue up. `open`: no glass wall on top (the rooms sit side by side).
 function lounge(open = false) {
@@ -498,6 +694,43 @@ function poses() {
   out.typeFront = over(FRONT).slice(0, 16);
   out.typeA = [...BACK]; set(out.typeA, 9, 2, "S"); set(out.typeA, 10, 2, "T");
   out.typeB = [...BACK]; set(out.typeB, 9, 13, "S"); set(out.typeB, 10, 13, "T");
+  // slumped over the desk (out of quota / exhausted): head dropped low, eyes shut, arms resting on the desk
+  out.slumpFront = [
+    "................",
+    "................",
+    "................",
+    "................",
+    ".....HHHHHH.....",
+    "....HHhhHHHH....",
+    "...HHhHHHHHHH...",
+    "...HHSSSSSSHH...",
+    "...HSSSSSSSSH...",
+    "...SSSSSSSSSS...",
+    "...SEESSSSEES...",
+    "...SRSSSSSSRS...",
+    "..TTSSSSSSSSST..",
+    "..TTTTTTTTTTTt..",
+    "...TTTTTTTTtt...",
+    "................",
+  ];
+  out.slumpBack = [
+    "................",
+    "................",
+    "................",
+    "...SS......SS...",
+    "..TTTHHHHHHTTT..",
+    "..TTTHHHhHHTTT..",
+    "..TTTHHHHHHTTT..",
+    "..TTTHHHHHHTTT..",
+    "...TTHHHHHHTT...",
+    "...TTHHHHHHTT...",
+    "...TTTTTTTTTt...",
+    "..TTTTTTTTTTtt..",
+    "..TTTTTTTTTTtt..",
+    "...TTTTTTTTtt...",
+    "....TTTTTTtt....",
+    "................",
+  ];
   const wave = (col, top) => {
     const g = over(FRONT, WORRIED);
     set(g, 14, 12, "t");
@@ -581,6 +814,9 @@ for (const [name, over] of Object.entries(STYLES)) {
   lounge(true);
   loungeFill();
   meetingRoom();
+  courtyard();
+  Object.entries(ORCHARD_CROWNS).forEach(([kind, lobes], i) => orchard(kind, lobes, C.orchardLeaves[i]));
+  doorOpen();
 }
 C = BASE;
 DIR = OUT;

@@ -5,7 +5,7 @@ import {
   WALL_H, POD_H, POD_X, SEAT_X, LOUNGE_H, MEET_H, SCENE_W, QUEUE_X, QUEUE_Y, LOUNGE_SPOTS, PALETTES,
   paletteOf, task, spot, windowName, tokens, resetsIn, pickLayout, meetingOn, toolOf,
   menuItems, nextInQueue, DESK_PAD, tagWidth, packTags, seatAt, seatPlace, podRect, assignSeats, podsPerOffice, demoAgents, errandSpot, WINDOW_X, phaseAt, clockText, DEMO,
-  openFileCommand,
+  openFileCommand, isQuotaError,
 } from "../mods/office/logic.js";
 
 test("meeting minutes open with each platform's own opener", () => {
@@ -227,11 +227,13 @@ test("the right-click menu fits the agent's status, stopping work last", () => {
   assert.ok(!ids({ status: "idle" }).includes("interrupt"));
   assert.equal(ids({ status: "idle" })[0], "dispatch");
   assert.equal(ids({ status: "done" })[0], "focus");
-  for (const status of ["blocked", "done", "working", "idle"]) {
+  for (const status of ["blocked", "tired", "done", "working", "idle"]) {
     const items = menuItems({ status });
     const firstDanger = items.findIndex((x) => x.danger);
     if (firstDanger >= 0) assert.ok(items.slice(firstDanger).every((x) => x.danger));
   }
+  assert.ok(!ids({ status: "tired" }).includes("dispatch"));
+  assert.ok(ids({ status: "tired" }).includes("kill"));
   assert.equal(menuItems({ status: "idle", pinned: true }).find((x) => x.id === "pin").label, "取消釘選");
   assert.deepEqual(ids({ intern: true }), ["peek", "focus", "kill"]);
 });
@@ -240,5 +242,19 @@ test("the next one at the person's desk: the longest-waiting blocked, else a fin
   const a = (address, status, seq) => ({ address, status, seq });
   assert.equal(nextInQueue([a("d", "done", 1), a("b2", "blocked", 9), a("b1", "blocked", 3)]).address, "b1");
   assert.equal(nextInQueue([a("w", "working", 1), a("d", "done", 5)]).address, "d");
-  assert.equal(nextInQueue([a("w", "working", 1)]), null);
+  assert.equal(nextInQueue([a("w", "working", 1), a("t", "tired", 2)]), null);
+});
+
+test("quota/rate-limit errors are detected and slump the agent over its own desk", () => {
+  // Herdr terminals() shape
+  assert.equal(isQuotaError({ status: "error", report: { msg: "You've hit your 5-hour limit · resets 1:50pm (Asia/Taipei)" } }), true);
+  // hc get --json shape
+  assert.equal(isQuotaError({ status: { state: "error", msg: "Rate limit exceeded (429)" } }), true);
+  // Non-quota error or non-error status
+  assert.equal(isQuotaError({ status: "error", report: { msg: "ENOENT: file not found" } }), false);
+  assert.equal(isQuotaError({ status: "blocked", report: { msg: "Allow edit?" } }), false);
+  assert.equal(isQuotaError(null), false);
+  // Slumped at its own seat (north: slumpFront, south: slumpBack)
+  assert.deepEqual(spot({ status: "tired" }, 0, 0, lo), [POD_X[0] + SEAT_X[0], WALL_H + 47, "slumpBack"]);
+  assert.deepEqual(spot({ status: "tired" }, 3, 0, lo), [POD_X[0] + SEAT_X[1], WALL_H + 3, "slumpFront"]);
 });

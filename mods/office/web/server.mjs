@@ -14,7 +14,7 @@ import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { delimiter, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEMO, TALK_MS, TOOL_NAMES, demoAgents } from "../logic.js";
+import { DEMO, TALK_MS, TOOL_NAMES, demoAgents, isQuotaError } from "../logic.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MOD = join(HERE, "..");
@@ -34,8 +34,8 @@ const readJson = async (path, fallback) => {
   try { return JSON.parse((await readFile(path, "utf8")).replace(/^﻿/, "")); } catch { return fallback; }
 };
 
-const STATUSES = new Set(["working", "blocked", "done", "idle"]);
-const statusOf = (s) => (s === "error" ? "blocked" : STATUSES.has(s) ? s : "idle");
+const STATUSES = new Set(["working", "blocked", "done", "tired", "idle"]);
+const statusOf = (s, term = null) => (isQuotaError(term) ? "tired" : s === "error" ? "blocked" : STATUSES.has(s) ? s : "idle");
 
 // ---------- what the office shows ----------
 
@@ -107,9 +107,11 @@ async function collect() {
       for (const t of tab.terminals ?? []) {
         if (!t.app) continue;
         const g = info[t.terminal];
+        const status = statusOf(t.status, g);
         agents.push({
           address: t.terminal,
-          status: statusOf(t.status),
+          status,
+          status_msg: status === "tired" ? (g?.status?.msg ?? "") : "",
           app: t.app,
           program: { name: TOOL_NAMES[t.app] ?? t.app },
           title: g?.title ?? null,
@@ -134,7 +136,7 @@ async function collect() {
     const app = g.status.app ?? g.agent;
     (interns[g.parent] ??= []).push({
       id: g.address, kind: "hc", type: TOOL_NAMES[app] ?? app ?? "agent", text: g.name ?? g.address,
-      status: statusOf(g.status.state),
+      status: statusOf(g.status.state, g),
     });
   }
 

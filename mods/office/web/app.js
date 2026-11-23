@@ -97,6 +97,7 @@ function figure(pose, pal, s) {
   if (pose === "type") return flip(sprite("typeA", pal, s), sprite("typeB", pal, s), w, R(16 * s), 500);
   // Facing us behind a monitor: only the head shows, nodding along as it types.
   if (pose === "typeFront") return bob(sprite("typeFront", pal, s), w, R(16 * s), 520, -0.7 * s);
+  if (pose === "slumpFront" || pose === "slumpBack") return bob(sprite(pose, pal, s), w, R(16 * s), 2200, 0.6 * s);
   if (pose === "wave") return flip(sprite("waveA", pal, s), sprite("waveB", pal, s), w, h, 600);
   if (pose === "cheer") return bob(sprite("cheer", pal, s), w, h, 600, -3 * s);
   return sprite(pose, pal, s);
@@ -320,7 +321,7 @@ function renderScene(d, P) {
   const L = pickLayout({ stageW, stageH, rows, meet: chairs.length > 0, pref: d.layout ?? "auto" });
   const s = L.s, lo = L.lo, mo = L.mo;
   const phase = phaseNow(style, d.daynight, d.demoHour);
-  const count = { working: 0, blocked: 0, done: 0, idle: 0 };
+  const count = { working: 0, blocked: 0, done: 0, tired: 0, idle: 0 };
   const placed = list.map((a) => {
     const seat = local(a);
     const chair = chairs.indexOf(a.address);
@@ -372,7 +373,7 @@ function renderScene(d, P) {
   const npods = rows * PODS_PER_ROW;
   const podLabel = Object.fromEntries(Object.entries(owner).map(([pod, space]) => [pod, `${spaceNames[space] ?? space} · ${counts[space] ?? 0} 位`]));
   // A far seat's plate sits on its monitor's back, shown only while its owner is away from it.
-  const seated = (p) => p.place[2] === "typeFront" && !walking[p.a.address];
+  const seated = (p) => (p.place[2] === "typeFront" || p.place[2] === "slumpFront") && !walking[p.a.address];
   const farPlates = placed.filter((p) => p.seat != null && seatAt(p.seat).north && !seated(p));
 
   const scene = $("scene");
@@ -473,7 +474,7 @@ function renderScene(d, P) {
 
 function renderHeader(list) {
   const count = (s) => list.filter((a) => a.status === s).length;
-  setHtml($("counts"), ["blocked", "done", "working", "idle"].filter((s) => count(s)).map((s) =>
+  setHtml($("counts"), ["blocked", "done", "working", "tired", "idle"].filter((s) => count(s)).map((s) =>
     `<div class="count" data-status="${s}"><div class="dot" style="background:var(--${s})"></div>${STATUS[s].label} ${count(s)}</div>`).join(""));
   const m = data.meeting;
   setHtml($("meeting"), meetingOn(m)
@@ -494,7 +495,8 @@ function renderRoster(list, P) {
     const name = names[a.address];
     const subs = interns[a.address] ?? [];
     const where = P.offices > 1 ? `<span class="fl" style="color:var(--${officeOf[a.address] === P.floor ? "foreground" : "dim"})">${officeOf[a.address] + 1}F</span>` : "";
-    return `<div class="agent${a.focused ? " focused" : ""}" data-addr="${esc(a.address)}" title="${esc(`${a.space_name} · ${a.program?.name ?? a.app ?? ""}`)}">`
+    const tip = [a.space_name, a.program?.name ?? a.app ?? "", a.status_msg].filter(Boolean).join(" · ");
+    return `<div class="agent${a.focused ? " focused" : ""}" data-addr="${esc(a.address)}" title="${esc(tip)}">`
       + `<img src="/img/head-${paletteOf(a.address)}.svg" style="width:18px;height:16px;flex:none" alt="">${where}`
       + `<div class="who">${name ? `<span class="nm">${esc(name)}</span>` : ""}`
       + `<span class="task" style="color:var(--${name ? "muted" : "foreground"})">${esc(task(a) || a.space_name)}</span>`

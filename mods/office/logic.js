@@ -29,7 +29,7 @@ export const TALK_MS = 10000;
 export const TOOL_NAMES = { "claude-code": "Claude Code", claude: "Claude Code", codex: "Codex", antigravity: "agy", agy: "agy" };
 export const toolOf = (a) => TOOL_NAMES[a.app] ?? TOOL_NAMES[a.program?.key] ?? a.program?.name ?? a.app ?? "Agent";
 export const meetingOn = (m) => !!m && (m.status === "running" || m.status === "summarizing") && Date.now() - (m.updated_at ?? 0) < 40 * 60000;
-export const POSE_H = { walkA: 21, walkB: 21, walk: 21, stand: 21, standBack: 21, waveA: 21, waveB: 21, cheer: 21, sofa: 19, back: 16, typeA: 16, typeB: 16, typeFront: 16 };
+export const POSE_H = { walkA: 21, walkB: 21, walk: 21, stand: 21, standBack: 21, waveA: 21, waveB: 21, cheer: 21, sofa: 19, back: 16, typeA: 16, typeB: 16, typeFront: 16, slumpFront: 16, slumpBack: 16 };
 export const PALETTES = 6;
 export const WALK = { duration: 1400, easing: "ease-in-out" };
 
@@ -37,9 +37,19 @@ export const STATUS = {
   blocked: { label: "等你回覆", mark: "!" },
   done: { label: "做完了", mark: "✓" },
   working: { label: "工作中" },
+  tired: { label: "沒精神" },
   idle: { label: "閒置" },
 };
-export const ORDER = { blocked: 0, done: 1, working: 2, idle: 3 };
+export const ORDER = { blocked: 0, done: 1, working: 2, tired: 3, idle: 4 };
+
+// Whether a terminal's hc status report is a quota/rate limit error rather than a prompt for the person.
+export function isQuotaError(term) {
+  if (!term) return false;
+  const state = term.status?.state ?? term.status;
+  if (state !== "error") return false;
+  const msg = term.report?.msg ?? term.status?.msg ?? "";
+  return /\b(limit|quota|rate.?limit|resets?|429)\b|額度|上限/i.test(msg);
+}
 
 export function paletteOf(address) {
   let h = 0;
@@ -126,6 +136,10 @@ export function assignSeats(list, prev = {}, cap = Infinity, reserve = []) {
 // room's top left.
 export function spot(a, seat, n, lo) {
   if (a.status === "working") return seatPlace(seat);
+  if (a.status === "tired") {
+    const p = seatAt(seat);
+    return p.north ? [p.x, p.top + 3, "slumpFront"] : [p.x, p.top + 47, "slumpBack"];
+  }
   if (a.status === "blocked" || a.status === "done") {
     const lap = Math.floor(n / QUEUE_Y.length);
     return [lo.x + QUEUE_X[a.status] - lap * 5, lo.y + QUEUE_Y[n % QUEUE_Y.length] + lap * 3, a.status === "blocked" ? "wave" : "cheer"];
@@ -145,6 +159,7 @@ export function menuItems({ status, pinned = false, intern = false }) {
   const kill = { id: "kill", label: "收工…", danger: true };
   if (intern) return [{ id: "peek", label: "偷看一下" }, { id: "focus", label: "前往" }, kill];
   if (status === "blocked") return [{ id: "focus", label: "前往回覆" }, { id: "peek", label: "偷看一下" }, pin, rename];
+  if (status === "tired") return [{ id: "focus", label: "前往" }, { id: "peek", label: "偷看一下" }, pin, rename, kill];
   if (status === "done") return [{ id: "focus", label: "前往驗收" }, { id: "dispatch", label: "交代下一件事…" }, rename, kill];
   if (status === "working") return [{ id: "peek", label: "偷看一下" }, { id: "dispatch", label: "補充交代…" }, { id: "focus", label: "前往" }, rename, { id: "interrupt", label: "喊停…", danger: true }, kill];
   return [{ id: "dispatch", label: "派工…" }, { id: "focus", label: "前往" }, pin, rename, kill];
@@ -277,4 +292,74 @@ export function openFileCommand(platform, dir, name) {
   if (platform === "windows") return ["cmd", ["/c", "start", "", `${dir.replace(/[\\/]+$/, "")}\\${name}`]];
   const path = `${dir.replace(/\/+$/, "")}/${name}`;
   return platform === "macos" ? ["open", [path]] : ["xdg-open", [path]];
+}
+
+// ---------- courtyard ----------
+// Courtyard scene width in scene units (matching SCENE_W).
+export const COURT_W = 200;
+// Courtyard scene height in scene units (top-down garden outside the office).
+export const COURT_H = 280;
+// Where agents enter and leave the courtyard: [x of the middle, y of the sprite's top, pose].
+export const COURT_DOOR = [100, 246, "stand"];
+// Winding path waypoints from the glass door through the garden: [x, y].
+export const COURT_PATH = [
+  [100, 246], [100, 214], [86, 190], [92, 166], [118, 150],
+  [140, 128], [128, 104], [104, 92], [96, 70], [118, 82],
+];
+// Orchard trees in the west half of the courtyard: [center x, sprite top y, fruit kind].
+export const ORCHARD = [
+  [28, 52, "apple"], [62, 58, "apricot"], [24, 92, "pear"],
+  [58, 98, "plum"], [30, 134, "cherry"], [64, 140, "apple"],
+];
+// Spots where idle agents rest in the courtyard, grouped by area: [x, y of sprite top, pose].
+export const COURT_SPOTS = {
+  terrace: [40, 100, 160].flatMap((x) => [
+    [x - 10, 210, "sofa"], [x + 10, 210, "sofa"],
+    [x - 10, 226, "back"], [x + 10, 226, "back"],
+  ]),
+  pond: [[146, 80, "standBack"], [166, 84, "standBack"], [182, 74, "standBack"]],
+  meadow: [[130, 170, "stand"], [160, 160, "sofa"], [176, 182, "stand"]],
+  tree: ORCHARD.map(([x, y]) => [x + 10, y + 28 + 4, "stand"]),
+};
+// The nth spot of a courtyard area (wrapping around), or null when the area is unknown.
+export function courtSpot(kind, n = 0) {
+  if (!Object.hasOwn(COURT_SPOTS, kind)) return null;
+  const list = COURT_SPOTS[kind];
+  return list[n % list.length];
+}
+// The path waypoint for step i: 0..9 in order, then looping across indices 2..9.
+export function pathPoint(i) {
+  return COURT_PATH[i < 2 ? i : 2 + ((i - 2) % (COURT_PATH.length - 2))];
+}
+
+// Give each move time to finish before sending the sprite to the next point.
+const COURT_STEP_MS = WALK.duration + 300;
+
+export function courtyardRoute(area, index) {
+  const stop = courtSpot(area, index);
+  const route = [{ place: null, duration: COURT_STEP_MS }, { place: COURT_DOOR, duration: 400 }];
+  const walkTo = (points) => points.map(([x, y]) => ({ place: [x, y, "stand"], duration: COURT_STEP_MS }));
+  if (stop) {
+    // Leave the path at the point nearest the resting spot, then return the same way.
+    const distance = ([x, y]) => Math.hypot(x - stop[0], y - stop[1]);
+    const nearest = COURT_PATH.reduce((best, point, i) => distance(point) < distance(COURT_PATH[best]) ? i : best, 0);
+    const approach = COURT_PATH.slice(0, nearest + 1);
+    route.push(...walkTo(approach.slice(1)), { place: stop, duration: COURT_STEP_MS + ERRAND_MS.min }, ...walkTo(approach.reverse()));
+  } else {
+    // Complete the loop once, then follow the first two waypoints back to the door.
+    const loop = Array.from({ length: COURT_PATH.length }, (_, i) => pathPoint(i + 1));
+    route.push(...walkTo(loop), ...walkTo(COURT_PATH.slice(0, 2).reverse()));
+  }
+  route.push({ place: null, duration: 700 });
+  return route;
+}
+
+// A null place means the agent is at the indoor side of the door. A null step means the trip ended.
+export function courtyardStep(route, elapsed) {
+  let end = 0;
+  for (const step of route) {
+    end += step.duration;
+    if (elapsed < end) return { place: step.place, end };
+  }
+  return null;
 }
