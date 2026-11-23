@@ -14,7 +14,7 @@ import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { delimiter, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEMO, TALK_MS, TOOL_NAMES } from "../logic.js";
+import { DEMO, TALK_MS, TOOL_NAMES, demoAgents } from "../logic.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MOD = join(HERE, "..");
@@ -75,14 +75,23 @@ async function claudeSubs(agents) {
 
 async function collect() {
   const shared = await readJson(join(HOME, "shared.json"), {});
-  const settings = { style: shared["office.style"] ?? null, layout: shared["office.layout"] ?? null, daynight: shared["office.daynight"] ?? null };
+  // The panel's look, and its seat map (one per office size) so both show the same seats.
+  const settings = {
+    style: shared["office.style"] ?? null, layout: shared["office.layout"] ?? null, daynight: shared["office.daynight"] ?? null,
+    seats: shared["office.seats"] ?? {}, reserved: shared["office.reserved"] ?? [],
+  };
   refreshUsage();
-  // A file named `demo` in the data folder swaps in the made-up office, as the panel does.
+  // A file named `demo` in the data folder swaps in the made-up office, as the panel does:
+  // "agents=30" for a crowd, "hour=18" to pin the clock, "floor=2" to show the second office.
   let demo = null;
   try { demo = await readFile(join(DATA, "demo"), "utf8"); } catch { /* not previewing */ }
   if (demo !== null) {
-    const hour = demo.match(/hour=(\d+)/)?.[1];
-    return { agents: DEMO, names: {}, interns: {}, talks: [], meeting: null, usage, ...settings, demoHour: hour === undefined ? null : Number(hour) % 24, at: Date.now() };
+    const hour = demo.match(/hour=(\d+)/)?.[1], floor = demo.match(/floor=(\d+)/)?.[1];
+    const size = Math.min(60, Number(demo.match(/agents=(\d+)/)?.[1] ?? DEMO.length));
+    return {
+      agents: demoAgents(size), names: {}, interns: {}, talks: [], meeting: null, usage, ...settings, demo: true,
+      demoHour: hour === undefined ? null : Number(hour) % 24, demoFloor: floor === undefined ? null : Number(floor), at: Date.now(),
+    };
   }
 
   const [ls, live] = await Promise.all([
@@ -137,7 +146,7 @@ async function collect() {
       .filter((x) => x && now - x.at < TALK_MS);
   } catch { /* no talk yet */ }
   const meeting = await readJson(join(DATA, "meeting.json"), null);
-  return { agents, names, interns, talks, meeting, usage, ...settings, demoHour: null, at: now };
+  return { agents, names, interns, talks, meeting, usage, ...settings, demo: false, demoHour: null, demoFloor: null, at: now };
 }
 
 // Several windows polling at once share one reading.

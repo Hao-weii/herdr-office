@@ -91,7 +91,7 @@ macOS、Linux 把最後一行換成 `./install.sh`。兩支腳本的選項對照
 herdr-app do mod.open --name office
 ```
 
-- **桌面視窗（雙螢幕用）**：齒輪選單的「開成桌面視窗（可拖到其他螢幕）」。Herdr 只能在自己唯一的視窗裡畫 Mod，所以這個視窗是一個網頁：`web/server.mjs` 在本機 `127.0.0.1:7421` 開一個小伺服器，讀 Herdr 的狀態，再用瀏覽器的 App 模式（沒有分頁和網址列）打開：Windows 用 Edge；macOS、Linux 依序找 Chrome、Edge、Chromium、Brave，都沒裝就用預設瀏覽器開成一般分頁。畫面跟面板一樣，點小人或成員清單會在 Herdr 裡切到那個 Agent。取名字和開會仍然在 Herdr 裡操作。關掉視窗約 5 分鐘後伺服器會自己結束。也可以手動開：
+- **桌面視窗（雙螢幕用）**：齒輪選單的「開成桌面視窗（可拖到其他螢幕）」。Herdr 只能在自己唯一的視窗裡畫 Mod，所以這個視窗是一個網頁：`web/server.mjs` 在本機 `127.0.0.1:7421` 開一個小伺服器，讀 Herdr 的狀態，再用瀏覽器的 App 模式（沒有分頁和網址列）打開：Windows 用 Edge；macOS、Linux 依序找 Chrome、Edge、Chromium、Brave，都沒裝就用預設瀏覽器開成一般分頁。畫面跟面板一樣（島型辦公室、多間辦公室的樓層分頁、門口進場、閒置走動、日夜），座位直接讀面板存的座位表，視窗大小相同時兩邊的座位一致。點小人或成員清單會在 Herdr 裡切到那個 Agent，點「你的桌子」切到等最久的那位。右鍵選單（派工、喊停、收工）、點空位開 Agent、取名字和開會只在 Herdr 面板裡操作。關掉視窗約 5 分鐘後伺服器會自己結束。也可以手動開：
 
 ```powershell
 node $HOME\.config\herdr-app\mods\office\web\server.mjs --open
