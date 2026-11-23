@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
 const req = JSON.parse(readFileSync(process.argv[2], "utf8"));
-const DATA = join(homedir(), ".config", "herdr-app", "data", "office");
+const DATA = join(process.env.HERDR_APP_HOME ?? join(homedir(), ".config", "herdr-app"), "data", "office");
 const WORK = join(tmpdir(), "herdr-office", "meetings", req.id);
 const KEEP = join(DATA, "meetings", req.id);
 const TRANSCRIPT = join(WORK, "transcript.md");

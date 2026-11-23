@@ -1,4 +1,4 @@
-﻿# Installs the office mod and links the team skill on Windows.
+﻿# Installs the office mod and links the team skill on Windows (install.sh on macOS and Linux).
 # .\install.ps1 -StatusLine          also configure Claude Code's status line
 # .\install.ps1 -Sidebar             also add an "辦公室" toggle to the right sidebar (clones main layout and tabs mod)
 # .\install.ps1 -DryRun -StatusLine  preview only; no files are changed
@@ -13,8 +13,15 @@ if ([int]$Matches[1] -lt 20) { throw "Node.js 20 or newer is required (found $no
 $herdrCommand = Get-Command herdr-app -CommandType Application -ErrorAction SilentlyContinue
 if (-not $herdrCommand) { throw 'herdr-app was not found on PATH. Install Herdr Desktop, add its folder to PATH, and reopen PowerShell.' }
 Write-Host "[check] Node.js $nodeVersionText; Herdr: $($herdrCommand.Source)"
-. (Join-Path $root 'scripts\statusline.ps1')
-if ($StatusLine) { Set-OfficeStatusLine -UserDirectory $HOME -DryRun -Force:$Force }
+function Invoke-StatusLine([switch]$Preview) {
+    $statusArgs = @((Join-Path $root 'scripts\setup-statusline.mjs'), '--home', $HOME)
+    if ($Preview) { $statusArgs += '--dry-run' }
+    if ($Force) { $statusArgs += '--force' }
+    & $nodeCommand.Source @statusArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Status line setup failed; settings were not changed.' }
+}
+# Preview first, so a broken settings.json stops the install before anything is copied.
+if ($StatusLine) { Invoke-StatusLine -Preview }
 Write-Host '[mod] mirror mods/office into the Herdr app'
 if (-not $DryRun) {
     & $nodeCommand.Source (Join-Path $root 'scripts\sync.mjs')
@@ -45,7 +52,7 @@ foreach ($tool in $targets.Keys) {
         New-Item -ItemType Junction -Path $link -Target $skill | Out-Null
     }
 }
-if ($StatusLine -and -not $DryRun) { Set-OfficeStatusLine -UserDirectory $HOME -Force:$Force }
+if ($StatusLine -and -not $DryRun) { Invoke-StatusLine }
 if ($Sidebar) {
     $sidebarArgs = @((Join-Path $root 'scripts\sidebar.mjs'))
     if ($DryRun) { $sidebarArgs += '--dry-run' }

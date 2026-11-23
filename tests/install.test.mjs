@@ -4,34 +4,86 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, exist
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+import { lstatSync, readlinkSync } from "node:fs";
 import { setupSidebar } from "../scripts/sidebar.mjs";
-const quote = s => "'" + s.replaceAll("'", "''") + "'";
-test("status line backup, conflict protection, preservation and DryRun", {skip: process.platform !== "win32"}, () => {
-  const base=mkdtempSync(join(tmpdir(),"herdr-office-status-"));
-  const user=join(base,"User With Spaces"),dir=join(user,".claude"),file=join(dir,"settings.json");
-  const helper=resolve("scripts/statusline.ps1");
-  const run=(flags="")=>execFileSync("powershell.exe",["-NoProfile","-Command",
-    "$ErrorActionPreference='Stop'; . "+quote(helper)+"; Set-OfficeStatusLine -UserDirectory "+quote(user)+" "+flags],{encoding:"utf8",stdio:["ignore","pipe","pipe"]});
+import { setupStatusLine, statusLineCommand } from "../scripts/setup-statusline.mjs";
+
+test("status line backup, conflict protection, preservation and dry run", () => {
+  const base = mkdtempSync(join(tmpdir(), "herdr-office-status-"));
+  const home = join(base, "User With Spaces"), dir = join(home, ".claude"), file = join(dir, "settings.json");
+  const lines = [];
+  const run = (opts = {}) => setupStatusLine({ home, log: (m) => lines.push(m), warn: (m) => lines.push(m), ...opts });
   try {
-    run("-DryRun");assert.equal(existsSync(dir),false);
-    mkdirSync(dir,{recursive:true});
-    const original='{"env":{"HELLO":"world"},"statusLine":{"type":"command","command":"existing"}}';
-    writeFileSync(file,original);
-    assert.match(run(),/different statusLine/);assert.equal(readFileSync(file,"utf8"),original);
-    run("-Force -DryRun");assert.deepEqual(readdirSync(dir),["settings.json"]);
-    assert.equal(readFileSync(file,"utf8"),original);
-    run("-Force");
-    const settings=JSON.parse(readFileSync(file,"utf8"));
-    assert.equal(settings.env.HELLO,"world");assert.equal(settings.statusLine.type,"command");
-    assert.equal(settings.statusLine.command,'node "'+user.replaceAll("\\","/")+'/.config/herdr-app/mods/office/statusline.mjs"');
-    const backups=readdirSync(dir).filter(f=>f.startsWith("settings.json.bak-"));
-    assert.equal(backups.length,1);assert.equal(readFileSync(join(dir,backups[0]),"utf8"),original);
-    run();assert.equal(readdirSync(dir).length,2);
-    writeFileSync(file,'{"permissions":{"allow":["Read"]}}');
-    run();assert.deepEqual(JSON.parse(readFileSync(file,"utf8")).permissions.allow,["Read"]);
-    writeFileSync(file,"not valid json");
-    assert.throws(()=>run("-Force"));assert.equal(readFileSync(file,"utf8"),"not valid json");
-  } finally {rmSync(base,{recursive:true,force:true});}
+    assert.equal(run({ dryRun: true }), "dry-run");
+    assert.equal(existsSync(dir), false);
+    mkdirSync(dir, { recursive: true });
+    const original = '{"env":{"HELLO":"world"},"statusLine":{"type":"command","command":"existing"}}';
+    writeFileSync(file, original);
+    assert.equal(run(), "conflict");
+    assert.match(lines.at(-1), /different statusLine/);
+    assert.equal(readFileSync(file, "utf8"), original);
+    run({ force: true, dryRun: true });
+    assert.deepEqual(readdirSync(dir), ["settings.json"]);
+    assert.equal(readFileSync(file, "utf8"), original);
+    assert.equal(run({ force: true }), "configured");
+    const settings = JSON.parse(readFileSync(file, "utf8"));
+    assert.equal(settings.env.HELLO, "world");
+    assert.equal(settings.statusLine.type, "command");
+    assert.equal(settings.statusLine.command, 'node "' + home.replaceAll("\\", "/") + '/.config/herdr-app/mods/office/statusline.mjs"');
+    const backups = readdirSync(dir).filter((f) => f.startsWith("settings.json.bak-"));
+    assert.equal(backups.length, 1);
+    assert.equal(readFileSync(join(dir, backups[0]), "utf8"), original);
+    assert.equal(run(), "unchanged");
+    assert.equal(readdirSync(dir).length, 2);
+    writeFileSync(file, '\uFEFF{"permissions":{"allow":["Read"]}}');
+    run();
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).permissions.allow, ["Read"]);
+    writeFileSync(file, "not valid json");
+    assert.throws(() => run({ force: true }));
+    assert.equal(readFileSync(file, "utf8"), "not valid json");
+    writeFileSync(file, "[]");
+    assert.throws(() => run({ force: true }), /JSON object/);
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test("the status line command keeps the existing Windows form", () => {
+  assert.equal(statusLineCommand("C:\\Users\\oright"), "node C:/Users/oright/.config/herdr-app/mods/office/statusline.mjs");
+  assert.equal(statusLineCommand("/home/a/"), "node /home/a/.config/herdr-app/mods/office/statusline.mjs");
+});
+
+test("install.sh installs the mod, links the skill and sets the status line on macOS and Linux", { skip: process.platform === "win32" }, () => {
+  const base = mkdtempSync(join(tmpdir(), "herdr-office-sh-"));
+  const home = join(base, "home"), bin = join(base, "bin"), app = join(home, ".config", "herdr-app");
+  mkdirSync(home);
+  mkdirSync(bin);
+  writeFileSync(join(bin, "herdr-app"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const env = { ...process.env, HOME: home, HERDR_APP_HOME: app, PATH: `${bin}:${process.env.PATH}` };
+  const run = (...args) => execFileSync("bash", [resolve("install.sh"), ...args], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const skill = resolve("skills/herdr-team");
+  const links = [".claude/skills", ".codex/skills", ".gemini/config/skills"].map((d) => join(home, d, "herdr-team"));
+  try {
+    assert.match(run("--dry-run", "--statusline"), /Dry run only/);
+    assert.equal(existsSync(join(app, "mods")), false);
+    assert.equal(existsSync(join(home, ".claude")), false);
+
+    run("--statusline");
+    assert.equal(existsSync(join(app, "mods", "office", "main.js")), true);
+    for (const link of links) {
+      assert.equal(lstatSync(link).isSymbolicLink(), true);
+      assert.equal(readlinkSync(link), skill);
+    }
+    const settings = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+    assert.equal(settings.statusLine.command, statusLineCommand(home));
+
+    const again = run("--statusline");
+    assert.match(again, /\[claude\] ok +herdr-team/);
+    assert.match(again, /already configured/);
+
+    rmSync(links[1]);
+    mkdirSync(links[1]);
+    assert.throws(() => run(), /real folder/);
+    assert.throws(() => run("--bogus"), /Unknown option/);
+  } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
 test("sidebar setup clones when missing, patches layout and tabs, and is idempotent", () => {

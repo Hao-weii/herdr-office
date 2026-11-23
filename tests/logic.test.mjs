@@ -5,7 +5,15 @@ import {
   WALL_H, POD_H, POD_X, SEAT_X, LOUNGE_H, MEET_H, SCENE_W, QUEUE_X, QUEUE_Y, LOUNGE_SPOTS, PALETTES,
   paletteOf, task, spot, windowName, tokens, resetsIn, pickLayout, meetingOn, toolOf,
   menuItems, nextInQueue, DESK_PAD, tagWidth, packTags, seatAt, seatPlace, podRect, assignSeats, podsPerOffice, demoAgents, errandSpot, WINDOW_X, phaseAt, clockText, DEMO,
+  openFileCommand,
 } from "../mods/office/logic.js";
+
+test("meeting minutes open with each platform's own opener", () => {
+  assert.deepEqual(openFileCommand("windows", "C:\\Users\\a b\\meetings\\1\\", "transcript.md"),
+    ["cmd", ["/c", "start", "", "C:\\Users\\a b\\meetings\\1\\transcript.md"]]);
+  assert.deepEqual(openFileCommand("macos", "/Users/a/meetings/1", "transcript.md"), ["open", ["/Users/a/meetings/1/transcript.md"]]);
+  assert.deepEqual(openFileCommand("linux", "/home/a/meetings/1/", "transcript.md"), ["xdg-open", ["/home/a/meetings/1/transcript.md"]]);
+});
 
 const lo = { x: 0, y: 200 };
 

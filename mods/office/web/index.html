@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>辦公室</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root {
+    --surface: #18181b; --background: #111113; --popover: #1f1f23; --raised: #27272a; --hover: #2f2f35;
+    --border: #2e2e33; --foreground: #e7e7ea; --muted: #a1a1aa; --dim: #71717a;
+    --accent: #5b8def; --accent-fg: #ffffff;
+    --working: #e5b45a; --blocked: #ef6b6b; --done: #6cc788; --idle: #8b8b94; --ok: #7cc47f;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --surface: #f6f6f7; --background: #ffffff; --popover: #ffffff; --raised: #ececee; --hover: #e2e2e6;
+      --border: #dcdce0; --foreground: #1c1c1e; --muted: #5c5c66; --dim: #8a8a94;
+      --working: #c98a1c; --blocked: #d64545; --done: #3d9a5c; --idle: #8b8b94;
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--surface); color: var(--foreground);
+    font: 12px/1.35 "Segoe UI", "Microsoft JhengHei UI", "PingFang TC", system-ui, sans-serif;
+    user-select: none;
+  }
+  img { display: block; image-rendering: pixelated; }
+
+  header { flex: none; height: 34px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--border); }
+  header b { font-size: 13px; }
+  #counts { flex: 1; display: flex; gap: 8px; color: var(--muted); font-size: 11px; min-width: 0; overflow: hidden; }
+  .count { display: flex; gap: 4px; align-items: center; white-space: nowrap; }
+  .dot { width: 6px; height: 6px; border-radius: 3px; }
+  .chip { height: 22px; padding: 0 8px; display: flex; align-items: center; border-radius: 6px; background: var(--raised); border: 1px solid var(--accent); font-size: 11.5px; white-space: nowrap; }
+
+  #usage { flex: none; height: 100px; margin: 8px 10px 0; padding: 8px 12px; display: flex; gap: 14px; align-items: flex-start;
+    overflow-x: auto; overflow-y: hidden; border-radius: 8px; background: var(--background); border: 1px solid var(--border); }
+  .note { height: 56px; display: flex; align-items: center; font-size: 11px; color: var(--dim); }
+  .provider { flex: none; display: flex; flex-direction: column; gap: 6px; }
+  .provider .name { display: flex; gap: 6px; align-items: center; font-size: 11.5px; white-space: nowrap; }
+  .gauges { display: flex; gap: 12px; }
+  .gauge { flex: none; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; color: var(--muted); }
+  .ring { position: relative; width: 40px; height: 40px; }
+  .ring span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--foreground); }
+  .ring span.count { font-size: 12px; color: var(--muted); }
+  .mask { position: absolute; inset: 0; -webkit-mask: var(--m) center / contain no-repeat; mask: var(--m) center / contain no-repeat; }
+  .icon { position: relative; width: 13px; height: 13px; flex: none; }
+  .sep { flex: none; width: 1px; height: 68px; background: var(--border); }
+
+  #stage { flex: 1; min-height: 0; padding: 8px 10px 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #scene { position: relative; overflow: hidden; border-radius: 8px; border: 1px solid var(--border); }
+  #scene .abs, #scene .char, #scene .intern { position: absolute; }
+  .row { display: flex; }
+  .col { display: flex; flex-direction: column; }
+  .zone { position: absolute; height: 17px; padding: 0 7px; border-radius: 9px; display: flex; align-items: center; font-size: 10px; font-weight: 600; white-space: nowrap; }
+  .plate { position: absolute; display: flex; justify-content: center; }
+  .plate div { max-width: 100%; padding: 0 5px; border-radius: 4px; font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .char, .intern { transition: left 1.4s ease-in-out, top 1.4s ease-in-out; cursor: pointer; }
+  .label { position: absolute; top: -22px; left: -60px; right: -60px; display: flex; justify-content: center; pointer-events: none; }
+  .label > div { height: 18px; padding: 0 6px; border-radius: 5px; display: flex; align-items: center; gap: 3px; font-size: 11px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+  .label .hover { display: none; background: var(--popover); border: 1px solid var(--border); color: var(--foreground); }
+  .char:hover .label .hover { display: flex; }
+  .char:hover .label .extra { display: none; }
+  .sign { font-weight: 600; color: var(--background); }
+  .pulse { animation: pulse 1.8s ease-in-out infinite alternate; }
+  .speaking { background: var(--accent); color: var(--accent-fg); font-weight: 600; animation: pulse 2.2s ease-in-out infinite alternate; }
+  .label .bubble { background: #fff; border: 1px solid #3a3a3c; color: #1c1c1e; border-radius: 9px; font-size: 10.5px; max-width: 190px; display: block; line-height: 16px; }
+  .label .doing { height: 16px; padding: 0 5px; border-radius: 8px; font-size: 10px; }
+  .legend { position: absolute; display: flex; flex-wrap: wrap; gap: 4px; }
+  .tag { height: 16px; padding: 0 6px; border-radius: 5px; border: 1px solid #00000026; color: #fff; font-size: 10px; font-weight: 600; line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .more { position: absolute; height: 14px; padding: 0 4px; border-radius: 7px; font-size: 9.5px; display: flex; align-items: center; }
+
+  .flip { position: relative; }
+  .flip > :first-child, .flip > .b { position: absolute; top: 0; left: 0; }
+  .flip > .b { animation: blink var(--p) steps(1, end) infinite; }
+  .bob { position: absolute; left: 0; top: 0; animation: bob var(--p) ease-in-out infinite alternate; }
+  .screen { position: absolute; background: #0d1117; overflow: hidden; }
+  .screen .lines { position: absolute; top: 0; animation: scroll var(--p) linear infinite alternate; }
+  .screen .cursor { position: absolute; background: #e6edf3; animation: blink 900ms steps(1, end) infinite; }
+
+  @keyframes blink { 0% { opacity: 0; } 50% { opacity: 1; } }
+  @keyframes bob { from { transform: translateY(0); } to { transform: translateY(var(--d)); } }
+  @keyframes scroll { from { transform: translateY(0); } to { transform: translateY(var(--d)); } }
+  @keyframes pulse { from { opacity: 0.5; } to { opacity: 1; } }
+
+  #roster { flex: none; max-height: 152px; overflow-y: auto; padding: 6px 10px; }
+  .agent { height: 28px; padding: 0 6px; display: flex; gap: 8px; align-items: center; border-radius: 6px; cursor: pointer; }
+  .agent:hover { background: var(--hover); }
+  .agent.focused { background: var(--raised); }
+  .agent .who { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; }
+  .agent .nm { flex: none; font-weight: 600; }
+  .agent .task { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agent .subs { flex: none; padding: 0 5px; border-radius: 4px; background: var(--raised); font-size: 10.5px; color: var(--muted); }
+  .agent .st { flex: none; display: flex; gap: 4px; align-items: center; font-size: 11px; }
+  .empty { flex: none; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--muted); }
+  #error { display: none; flex: none; margin: 8px 10px 0; padding: 6px 10px; border-radius: 6px; background: var(--blocked); color: #fff; font-size: 11.5px; }
+</style>
+</head>
+<body>
+  <header><b>辦公室</b><div id="counts"></div><div id="meeting"></div></header>
+  <div id="error"></div>
+  <div id="usage"><div class="note">讀取用量中…</div></div>
+  <main id="stage"><div id="scene"></div></main>
+  <div id="roster"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

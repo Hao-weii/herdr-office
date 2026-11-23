@@ -271,3 +271,10 @@ export function podsPerOffice({ stageW, stageH, pref = "auto" }) {
   while (rows < 12 && pickLayout({ stageW, stageH, rows: rows + 1, meet: false, pref }).s >= READABLE) rows++;
   return rows * PODS_PER_ROW;
 }
+
+// The command that opens a file with its default app. `platform` is Herdr's window().platform.
+export function openFileCommand(platform, dir, name) {
+  if (platform === "windows") return ["cmd", ["/c", "start", "", `${dir.replace(/[\\/]+$/, "")}\\${name}`]];
+  const path = `${dir.replace(/\/+$/, "")}/${name}`;
+  return platform === "macos" ? ["open", [path]] : ["xdg-open", [path]];
+}

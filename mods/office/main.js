@@ -18,12 +18,13 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, terminals, spaces, panes, knownAgents, theme, run, props, openOverlay, closeOverlay, exec, hc, appHome, checking, shared, setShared, readTextFile, notify } from "herdr";
+import { agents, terminals, spaces, panes, knownAgents, theme, run, props, openOverlay, closeOverlay, exec, hc, appHome, checking, shared, setShared, readTextFile, notify, window as herdrWindow } from "herdr";
 import * as fs from "fs/promises";
 import {
   SCENE_W, WALL_H, LOUNGE_H, FILL_H, LOUNGE_SPOTS, QUEUE_X, QUEUE_Y, MEET_H, MEET_SEATS, TALK_MS, TOOL_NAMES, toolOf, meetingOn, POSE_H, PALETTES, WALK, STATUS, ORDER, paletteOf, clean, task, spot, windowName, tokens, resetsIn, pickLayout,
   POD_W, POD_H, PODS_PER_ROW, SEATS_PER_POD, DOOR, DESK_PAD, tagWidth, packTags, seatAt, podRect, assignSeats, podsPerOffice, demoAgents,
   ERRANDS, ERRAND_MS, errandSpot, phaseAt, clockText, DEMO, menuItems, DISPATCH_TITLE, nextInQueue,
+  openFileCommand,
 } from "./logic.js";
 
 // Looks the person can pick (art in img/<id>/), and how the room is laid out. Saved in shared state.
@@ -54,6 +55,13 @@ const phaseNow = (hour = null) => styleOf().id === "night" ? "night"
 // The roster at its tallest (five rows, then it scrolls), and the office tabs row.
 const ROSTER_MAX = 5 * 28 + 12, TABS_H = 30;
 const RUGS = ["#6f9fd8", "#7fb07a", "#e9a24a", "#d9727a", "#a98bd6", "#5fb3b0"];
+
+// Herdr draws mods only inside its one window, so the desktop window is a browser page
+// (web/server.mjs) that shows the office and can go on another screen.
+function openDesktop() {
+  exec("node", [`${appHome()}/mods/office/web/server.mjs`, "--open"], { timeout: 20000 })
+    .catch((e) => notify({ title: "桌面視窗沒開成", body: String(e?.message ?? e).slice(0, 200), level: "error" }));
+}
 
 
 // ---------- actions, shared by the panel and its menus and dialogs ----------
@@ -610,7 +618,9 @@ export default class Office extends View {
 
   openMinutes() {
     const m = this.meeting;
-    if (m?.dir) exec("cmd", ["/c", "start", "", `${m.dir}\\transcript.md`]).catch(() => {});
+    if (!m?.dir) return;
+    const [cmd, args] = openFileCommand(herdrWindow().platform, m.dir, "transcript.md");
+    exec(cmd, args).catch((e) => notify({ title: "打不開會議紀錄", body: `${m.dir}：${String(e?.message ?? e).slice(0, 160)}`, level: "error" }));
   }
 
   renderMeetingSetup() {
@@ -1239,20 +1249,23 @@ export default class Office extends View {
           .when(it.id !== current, (el) => el.hover((st) => st.text_color(t.foreground)))
           .on_click(() => setShared(key, it.id))
           .child(it.label))));
+    // The floating window stays inside Herdr; the desktop window can go on another screen.
+    const windowButton = (id, text, action) => h_flex().id(id).h(28).px(10).rounded(8).justify_center().items_center()
+      .bg(t.raised).border(1).border_color(t.border).text_size(12).text_color(t.foreground)
+      .hover((st) => st.bg(t.hover))
+      .on_click(() => {
+        action();
+        if (props()?.overlay) closeOverlay(props().overlay);
+      })
+      .child(text);
     return v_flex().size_full().p(12).gap(12).bg(t.popover)
       .child(row("風格", STYLES, styleOf().id, "office.style"))
       .child(row("佈局", LAYOUTS, layoutOf().id, "office.layout"))
       .child(row("日夜", DAYNIGHT, daynightOf().id, "office.daynight"))
       .child(v_flex().gap(6)
         .child(div().text_size(11).text_color(t.dim).child("視窗"))
-        .child(h_flex().id("office-popout").h(28).px(10).rounded(8).justify_center().items_center()
-          .bg(t.raised).border(1).border_color(t.border).text_size(12).text_color(t.foreground)
-          .hover((st) => st.bg(t.hover))
-          .on_click(() => {
-            run("mod.open", { name: "office" });
-            if (props()?.overlay) closeOverlay(props().overlay);
-          })
-          .child("以獨立視窗開啟")));
+        .child(windowButton("office-popout", "以浮動視窗開啟（在 Herdr 裡）", () => run("mod.open", { name: "office" })))
+        .child(windowButton("office-desktop", "開成桌面視窗（可拖到其他螢幕）", () => openDesktop())));
   }
 
   // Start a meeting; while one runs, its progress and a stop button; after, its minutes.
@@ -1290,7 +1303,7 @@ export default class Office extends View {
       .child(this.meetingControl(t))
       .child(div().id("office-settings").p(4).rounded(5).tooltip("設定")
         .hover((st) => st.bg(t.hover))
-        .on_click(() => openOverlay({ mod: "office", kind: "popup", width: 248, height: 290, props: { settings: true } }))
+        .on_click(() => openOverlay({ mod: "office", kind: "popup", width: 260, height: 324, props: { settings: true } }))
         .child(svg("mods/workspace-chrome/settings.svg").size(14).text_color(t.muted)))
       .when(!!overlay, (el) => el.child(div().id("office-close").px(6).rounded(4).text_color(t.muted)
         .hover((st) => st.bg(t.hover).text_color(t.foreground))

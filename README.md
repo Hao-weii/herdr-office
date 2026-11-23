@@ -22,16 +22,19 @@ Herdr 桌面 App 的像素辦公室面板。每個在 Herdr 裡跑的 coding age
 | 會議 | 給一個題目，選幾位 Agent 輪流發言，最後整理結論，紀錄存成 Markdown |
 | 取名 | 右鍵選單的「取名…」或成員清單的鉛筆，幫 Agent 取名字 |
 | 風格與佈局 | 現代明亮、溫暖木質、夜間三種風格；佈局可自動、上下或左右 |
+| 桌面視窗 | 用瀏覽器開一個獨立的辦公室視窗，可以拖到第二個螢幕 |
 
 ## 需求
 
-- Herdr 桌面 App（`herdr-app`），已在 Windows 上測過
+- Herdr 桌面 App（`herdr-app`）。Windows 實機測過；macOS、Linux 有安裝腳本和自動測試，還沒在實機上跑過
 - Node.js 20 以上（讀用量、主持會議、產圖、測試都用到）
 - 要顯示 Claude Code 的方案額度，需要另外設定狀態列（見下方）
 
 ## 在新電腦建起來
 
-需求：Windows、Git（已設定 GitHub SSH 金鑰並有此儲存庫權限）、Node.js 20 以上、Herdr Desktop。先開啟 Herdr；確認 `node --version` 與 `herdr-app --help` 可以執行。缺少工具或版本太舊時，安裝腳本會印出提示並停止。
+需求：Git（已設定 GitHub SSH 金鑰並有此儲存庫權限）、Node.js 20 以上、Herdr Desktop。先開啟 Herdr；確認 `node --version` 與 `herdr-app --help` 可以執行。缺少工具或版本太舊時，安裝腳本會印出提示並停止。
+
+Windows（PowerShell）：
 
 ```powershell
 git clone git@github.com:Hao-weii/herdr-office.git
@@ -39,6 +42,17 @@ cd herdr-office
 npm test
 npm run check
 .\install.ps1 -StatusLine -Sidebar
+herdr-app do mod.open --name office
+```
+
+macOS、Linux（終端機）：
+
+```bash
+git clone git@github.com:Hao-weii/herdr-office.git
+cd herdr-office
+npm test
+npm run check
+./install.sh --statusline --sidebar
 herdr-app do mod.open --name office
 ```
 
@@ -52,21 +66,38 @@ cd $HOME\Documents\GitHub\herdr-office
 .\install.ps1
 ```
 
-`install.ps1` 會做以下動作：
+macOS、Linux 把最後一行換成 `./install.sh`。兩支腳本的選項對照：
+
+| Windows（`install.ps1`） | macOS、Linux（`install.sh`） | 作用 |
+|---|---|---|
+| `-StatusLine` | `--statusline` | 設定 Claude Code 狀態列 |
+| `-Sidebar` | `--sidebar` | 加入右側邊欄的「辦公室」按鈕 |
+| `-DryRun` | `--dry-run` | 只印出計畫，不改任何檔案 |
+| `-Force` | `--force` | 已有不同的狀態列時，強制換掉 |
+
+安裝腳本會做以下動作：
 
 1. 把 `mods/office` 複製到 `~/.config/herdr-app/mods/office`
-2. 用目錄連結把 `skills/herdr-team` 接到 Claude Code、Codex、agy 的 Skill 資料夾
-3. 有指定 `-StatusLine` 時，備份並設定 Claude Code 狀態列
-4. 有指定 `-Sidebar` 時，從 Herdr 原生的 `main` 版面與 `tabs` Mod 各自 clone 出 `office` 與 `tabs-office`，在右上角加入與 `Files`、`Changes` 並列的「辦公室」右側邊欄切換按鈕並切到該版面（因為 Herdr 原生版面與 Mod 在啟動／更新時會被覆蓋，必須使用 clone 才會保留）
+2. 把 `skills/herdr-team` 接到 Claude Code、Codex、agy 的 Skill 資料夾（Windows 用目錄連結，macOS、Linux 用符號連結）
+3. 有指定狀態列選項時，備份並設定 Claude Code 狀態列（兩個平台共用 `scripts/setup-statusline.mjs`）
+4. 有指定側邊欄選項時，從 Herdr 原生的 `main` 版面與 `tabs` Mod 各自 clone 出 `office` 與 `tabs-office`，在右上角加入與 `Files`、`Changes` 並列的「辦公室」右側邊欄切換按鈕並切到該版面（因為 Herdr 原生版面與 Mod 在啟動／更新時會被覆蓋，必須使用 clone 才會保留）
 
 ### 打開辦公室
 
-- **右側邊欄（推薦單螢幕）**：安裝時加上 `.\install.ps1 -Sidebar`，右上角會多出「辦公室」按鈕，點一下即可像 `Changes` 一樣展開／收合；在面板右上角齒輪選單裡也可隨時點「以獨立視窗開啟」。
-- **獨立浮動視窗（適合雙螢幕）**：直接執行 `mod.open`：
+- **右側邊欄**：安裝時加上 `.\install.ps1 -Sidebar`，右上角會多出「辦公室」按鈕，點一下即可像 `Changes` 一樣展開／收合。
+- **浮動視窗**：齒輪選單的「以浮動視窗開啟（在 Herdr 裡）」，或直接執行 `mod.open`。它蓋在 Herdr 版面上方，只能在 Herdr 視窗範圍內拖動，拖不到其他螢幕：
 
 ```powershell
 herdr-app do mod.open --name office
 ```
+
+- **桌面視窗（雙螢幕用）**：齒輪選單的「開成桌面視窗（可拖到其他螢幕）」。Herdr 只能在自己唯一的視窗裡畫 Mod，所以這個視窗是一個網頁：`web/server.mjs` 在本機 `127.0.0.1:7421` 開一個小伺服器，讀 Herdr 的狀態，再用瀏覽器的 App 模式（沒有分頁和網址列）打開：Windows 用 Edge；macOS、Linux 依序找 Chrome、Edge、Chromium、Brave，都沒裝就用預設瀏覽器開成一般分頁。畫面跟面板一樣，點小人或成員清單會在 Herdr 裡切到那個 Agent。取名字和開會仍然在 Herdr 裡操作。關掉視窗約 5 分鐘後伺服器會自己結束。也可以手動開：
+
+```powershell
+node $HOME\.config\herdr-app\mods\office\web\server.mjs --open
+```
+
+  埠號被占用時，用環境變數 `OFFICE_WEB_PORT` 換一個。
 
 如果要放進自己既有的客製版面（`~/.config/herdr-app/layouts/<名稱>.json`），可加一個 block：
 
@@ -76,9 +107,9 @@ herdr-app do mod.open --name office
 
 ### Claude Code 的方案額度
 
-執行 `.\install.ps1 -StatusLine`，會將 Claude Code 的 `statusLine` 指向本機安裝的 `office/statusline.mjs`。家目錄使用正斜線，路徑有空格時會加引號。
+執行 `.\install.ps1 -StatusLine`（macOS、Linux 是 `./install.sh --statusline`），會將 Claude Code 的 `statusLine` 指向本機安裝的 `office/statusline.mjs`。家目錄使用正斜線，路徑有空格時會加引號。
 
-修改前會將 `~/.claude/settings.json` 備份為 `settings.json.bak-<時間>`，並保留其他設定。已有不同的狀態列時只警告；確定要替換才使用 `.\install.ps1 -StatusLine -Force`。加上 `-DryRun` 只印出計畫，不複製 Mod、建立連結、備份或寫入設定。
+修改前會將 `~/.claude/settings.json` 備份為 `settings.json.bak-<時間>`，並保留其他設定。已有不同的狀態列時只警告；確定要替換才加上 `-Force`（`--force`）。加上 `-DryRun`（`--dry-run`）只印出計畫，不複製 Mod、建立連結、備份或寫入設定。
 
 狀態列提供 Claude Code 的 5 小時和每週額度，也記錄 Herdr 終端機與 Claude 對話的對應，讓辦公室找到 Claude 的子代理。
 
@@ -114,11 +145,14 @@ mods/office/
   usage.mjs        讀各工具的用量，每分鐘由面板執行一次
   statusline.mjs   Claude Code 狀態列：存額度、記錄對話對應
   meeting.mjs      會議主持，在背景的 hc 終端機裡跑
+  web/             桌面視窗：server.mjs（本機伺服器與啟動器）、index.html、app.js（在瀏覽器裡畫辦公室）
   art/generate.mjs 用程式畫所有像素圖
   img/             產生出來的圖（三種風格的房間、角色、圓環）
 skills/herdr-team/ 讓 Agent 學會互相傳話的 Skill，scripts/tell.mjs 負責送訊息和記錄
-scripts/           sync.mjs（同步到 Herdr）、check.mjs（語法檢查）
-tests/             單元測試，usage 的測試用假的家目錄
+scripts/           sync.mjs（同步到 Herdr）、check.mjs（語法檢查）、setup-statusline.mjs（設定狀態列）、sidebar.mjs（右側邊欄）
+install.ps1        Windows 安裝腳本
+install.sh         macOS、Linux 安裝腳本
+tests/             單元測試，usage 和 web 的測試用假的家目錄
 ```
 
 ## 執行時的資料
@@ -134,7 +168,8 @@ GitHub Actions（`.github/workflows/ci.yml`）每次推送都會跑：語法檢�
 - agy 的額度只存在 Google 的伺服器，本機讀不到，所以只顯示提問次數
 - Codex、agy 內建的子代理還看不到；用 `hc run` 開的看得到
 - Claude 的子代理要等該對話回覆過一次才看得到（對應關係由狀態列記錄）
-- 只在 Windows 上測過
+- 只在 Windows 實機測過。macOS、Linux 的安裝腳本、桌面視窗和開會議紀錄都有處理，`install.sh` 也在 CI 的 Linux 上自動測試，但還沒在實機的 Herdr 上跑過
+- 需要 `herdr-app`、`hc`、`node` 都在 PATH 上。macOS 從 Dock 開的 App 不一定讀得到終端機的 PATH，Herdr 裡讀用量、開會、開桌面視窗可能因此找不到 `node`
 
 ## 待補
 
