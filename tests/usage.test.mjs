@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -83,4 +83,48 @@ test("a second run reads only what was added since", () => {
 test("a home with no tools shows nothing", () => {
   const home = mkdtempSync(join(tmpdir(), "herdr-office-empty-"));
   try { assert.deepEqual(run(home).providers, []); } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("codex picks the newest rate_limits by timestamp and resets expired windows", () => {
+  const home = mkdtempSync(join(tmpdir(), "herdr-office-reset-"));
+  try {
+    const now = Date.now();
+    const d = new Date();
+    const ymd = [String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")];
+    const codexDir = join(home, ".codex", "sessions", ...ymd);
+    mkdirSync(codexDir, { recursive: true });
+
+    const olderContent = join(codexDir, "rollout-newer-mtime.jsonl");
+    const newerContent = join(codexDir, "rollout-older-mtime.jsonl");
+    writeFileSync(olderContent, JSON.stringify({
+      timestamp: new Date(now - 3600_000).toISOString(),
+      payload: { type: "token_count", rate_limits: {
+        plan_type: "team",
+        primary: { used_percent: 18, window_minutes: 300, resets_at: Math.floor(now / 1000) - 600 },
+        secondary: { used_percent: 52, window_minutes: 10080, resets_at: Math.floor(now / 1000) + 3600 },
+      } },
+    }) + "\n");
+    writeFileSync(newerContent, JSON.stringify({
+      timestamp: new Date(now - 60_000).toISOString(),
+      payload: { type: "token_count", rate_limits: {
+        plan_type: "team",
+        primary: { used_percent: 76, window_minutes: 300, resets_at: Math.floor(now / 1000) - 600 },
+        secondary: { used_percent: 61, window_minutes: 10080, resets_at: Math.floor(now / 1000) + 3600 },
+      } },
+    }) + "\n");
+    // Give the older-timestamp file a newer mtime to mirror NTFS mtime skew.
+    utimesSync(newerContent, new Date(now - 7200_000), new Date(now - 7200_000));
+    utimesSync(olderContent, new Date(now), new Date(now));
+
+    const data = join(home, ".config", "herdr-app", "data", "office");
+    mkdirSync(data, { recursive: true });
+    writeFileSync(join(data, "claude-usage.json"), JSON.stringify({ windows: [
+      { label: "5 小時額度", used: 45, resets_at: Math.floor(now / 1000) - 60 },
+      { label: "每週額度", used: 84, resets_at: Math.floor(now / 1000) + 86400 },
+    ], at: now }));
+
+    const by = Object.fromEntries(run(home).providers.map((p) => [p.id, p]));
+    assert.deepEqual(by.codex.windows.map((w) => [w.minutes, w.used]), [[300, 0], [10080, 61]]);
+    assert.deepEqual(by.claude.windows.map((w) => [w.label, w.used]), [["5 小時", 0], ["每週", 84]]);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });

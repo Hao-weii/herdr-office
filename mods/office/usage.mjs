@@ -47,6 +47,8 @@ async function codex() {
     }
   }
   files.sort((a, b) => b.s.mtimeMs - a.s.mtimeMs);
+  let best = null;
+  let bestAt = -1;
   for (const { f, s } of files.slice(0, 8)) {
     const lines = (await readRange(f, Math.max(0, s.size - 400_000), s.size)).toString("utf8").split("\n").reverse();
     for (const line of lines) {
@@ -55,12 +57,18 @@ async function codex() {
         const row = JSON.parse(line);
         const rl = row.payload?.rate_limits ?? row.rate_limits;
         if (!rl) continue;
-        const win = (w) => w && { used: w.used_percent, minutes: w.window_minutes, resets_at: w.resets_at };
-        return { plan: rl.plan_type ?? null, windows: [win(rl.primary), win(rl.secondary)].filter(Boolean), at: row.timestamp ?? null };
+        const ts = row.timestamp ? Date.parse(row.timestamp) : NaN;
+        const at = Number.isFinite(ts) ? ts : s.mtimeMs;
+        if (at > bestAt) {
+          bestAt = at;
+          const win = (w) => w && { used: w.used_percent, minutes: w.window_minutes, resets_at: w.resets_at };
+          best = { plan: rl.plan_type ?? null, windows: [win(rl.primary), win(rl.secondary)].filter(Boolean), at: row.timestamp ?? null };
+        }
+        break;
       } catch { /* a cut-off first line */ }
     }
   }
-  return null;
+  return best;
 }
 
 async function claude() {
@@ -163,19 +171,20 @@ const [seenClaude, seenCodex, seenAgy] = await Promise.all([
 ]);
 
 // Every tool used in the last week, most recent first.
+const resetIfExpired = (w) => (w.resets_at && w.resets_at * 1000 <= now ? { ...w, used: 0 } : w);
 const providers = [];
 if (seenClaude && now - seenClaude < WEEK) {
   const fresh = plan?.windows?.length && now - plan.at < WEEK;
   providers.push({
     id: "claude", name: "Claude Code", icon: "icons/claude.svg", tint: "#d97757", seen: seenClaude,
-    windows: fresh ? plan.windows.map((w) => ({ label: w.label.replace("額度", ""), used: w.used, resets_at: w.resets_at })) : [],
+    windows: fresh ? plan.windows.map((w) => resetIfExpired({ label: w.label.replace("額度", ""), used: w.used, resets_at: w.resets_at })) : [],
     detail: cl?.today?.replies ? `今天 ${cl.today.replies} 次回覆，輸出 ${cl.today.output}、輸入 ${cl.today.input} Token` : null,
   });
 }
 if (seenCodex && now - seenCodex < WEEK) {
   providers.push({
     id: "codex", name: "Codex", icon: "icons/codex.svg", tint: null, seen: seenCodex, plan: cx?.plan ?? null,
-    windows: (cx?.windows ?? []).map((w) => ({ minutes: w.minutes, used: w.used, resets_at: w.resets_at })),
+    windows: (cx?.windows ?? []).map((w) => resetIfExpired({ minutes: w.minutes, used: w.used, resets_at: w.resets_at })),
     detail: null,
   });
 }

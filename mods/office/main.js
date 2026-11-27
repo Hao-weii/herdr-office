@@ -778,9 +778,10 @@ export default class Office extends View {
 
   // One quota as a ring: the arc is what's left, the number in the middle too; details on hover.
   gauge(id, label, used, resetsAt, t) {
-    const rest = Math.max(0, Math.min(100, 100 - Math.round(used)));
+    const u = resetsAt && resetsAt * 1000 <= Date.now() ? 0 : used;
+    const rest = Math.max(0, Math.min(100, 100 - Math.round(u)));
     const color = rest <= 15 ? t.blocked : rest <= 40 ? t.working : "#7cc47f";
-    const tip = `剩 ${rest}%（已用 ${Math.round(used)}%）${resetsAt ? `，${resetsIn(resetsAt)}` : ""}`;
+    const tip = `剩 ${rest}%（已用 ${Math.round(u)}%）${resetsAt ? `，${resetsIn(resetsAt)}` : ""}`;
     const D = 40;
     return v_flex().id(id).gap(3).items_center().flex_none().tooltip(tip)
       .child(div().relative().w(D).h(D)

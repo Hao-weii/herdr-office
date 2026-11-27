@@ -55,9 +55,10 @@ const ownSeats = {};
 const mask = (url, color) => `<i class="mask" style="--m:url('${url}');background:${color}"></i>`;
 
 function gauge(label, used, resetsAt) {
-  const rest = Math.max(0, Math.min(100, 100 - R(used)));
+  const u = resetsAt && resetsAt * 1000 <= Date.now() ? 0 : used;
+  const rest = Math.max(0, Math.min(100, 100 - R(u)));
   const color = rest <= 15 ? "var(--blocked)" : rest <= 40 ? "var(--working)" : "var(--ok)";
-  const tip = `剩 ${rest}%（已用 ${R(used)}%）${resetsAt ? `，${resetsIn(resetsAt)}` : ""}`;
+  const tip = `剩 ${rest}%（已用 ${R(u)}%）${resetsAt ? `，${resetsIn(resetsAt)}` : ""}`;
   return `<div class="gauge" title="${esc(tip)}"><div class="ring">${mask("/img/ring-track.svg", "var(--raised)")}${mask(`/img/ring-${rest}.svg`, color)}<span>${rest}%</span></div>${esc(label)}</div>`;
 }
 
