@@ -154,6 +154,7 @@ scripts/           sync.mjs（同步到 Herdr）、check.mjs（語法檢查）�
 install.ps1        Windows 安裝腳本
 install.sh         macOS、Linux 安裝腳本
 tests/             單元測試，usage 和 web 的測試用假的家目錄
+ROADMAP.md         架構盤點與後續優化藍圖
 ```
 
 ## 執行時的資料
